@@ -14,7 +14,6 @@ import android.text.TextWatcher
 import android.text.method.PasswordTransformationMethod
 import android.view.Gravity
 import android.view.View
-import android.view.ViewOutlineProvider
 import android.widget.FrameLayout
 import android.widget.ImageView
 import android.widget.HorizontalScrollView
@@ -84,13 +83,13 @@ class MainActivity : Activity() {
             val bars = LinearLayout(this)
             for (i in 1..4) {
                 val b = View(this)
-                b.setBackgroundColor(if (i <= stepNo) Pal.accent else Pal.line)
-                bars.addView(b, lp(0, dp(3), 0, 0, if (i < 4) 5 else 0, 0).also { it.weight = 1f })
+                b.background = brut(if (i <= stepNo) Pal.accent else Pal.panel, 0, false, 2f, 2)
+                bars.addView(b, lp(0, dp(12), 0, 0, if (i < 4) 6 else 0, 0).also { it.weight = 1f })
             }
             col.addView(bars, lp(MATCH, WRAP, 0, 20, 0, 0))
         }
 
-        col.addView(tv(title, 30f, Pal.text, Fonts.head), lp(MATCH, WRAP, 0, 22, 0, 0))
+        col.addView(tv(title, 30f, Pal.text, Fonts.black), lp(MATCH, WRAP, 0, 22, 0, 0))
         col.addView(tv(note, 15f, Pal.dim, Fonts.note).also { it.setLineSpacing(0f, 1.1f) }, lp(MATCH, WRAP, 0, 6, 0, 14))
 
         val sc = ScrollView(this)
@@ -125,11 +124,7 @@ class MainActivity : Activity() {
             val cur = model.text.toString().trim()
             for (i in rows.indices) {
                 val sel = Models.all[i].id == cur
-                rows[i].background = box(
-                    if (sel) Pal.raised else Pal.panel, 8f,
-                    if (sel) Pal.accent else Pal.line,
-                    if (sel) 2 else 1
-                )
+                rows[i].background = brut(if (sel) Pal.hi else Pal.panel, 4)
             }
         }
 
@@ -143,6 +138,7 @@ class MainActivity : Activity() {
             val row = LinearLayout(this)
             row.orientation = LinearLayout.VERTICAL
             row.setPadding(dp(14), dp(10), dp(14), dp(10))
+            skin(row, Pal.panel, 4)
             row.addView(tv(m.name, 16f, Pal.text, Fonts.head))
             row.addView(tv(m.id, 12f, Pal.accent, Fonts.mono))
             row.addView(tv(m.note, 12f, Pal.dim, Fonts.body).also { it.setPadding(0, dp(2), 0, 0) })
@@ -289,11 +285,7 @@ class MainActivity : Activity() {
         fun paint() {
             for (i in cards.indices) {
                 val sel = ids[i] == chosen
-                cards[i].background = box(
-                    if (sel) Pal.raised else Pal.panel, 8f,
-                    if (sel) Pal.accent else Pal.line,
-                    if (sel) 2 else 1
-                )
+                cards[i].background = brut(if (sel) Pal.hi else Pal.panel, 4)
             }
         }
 
@@ -302,6 +294,7 @@ class MainActivity : Activity() {
             val c = LinearLayout(this)
             c.orientation = LinearLayout.VERTICAL
             c.setPadding(dp(16), dp(14), dp(16), dp(14))
+            skin(c, Pal.panel, 4)
             c.addView(tv(Mode.label(id), 19f, Pal.text, Fonts.head))
             c.addView(tv(Mode.about(id), 13f, Pal.dim, Fonts.body).also {
                 it.setPadding(0, dp(4), 0, 0)
@@ -323,8 +316,8 @@ class MainActivity : Activity() {
         val chips = LinearLayout(this)
         for (name in listOf("Indonesia", "Inggris", "Jepang", "Korea", "Mandarin")) {
             val ch = tv(name, 13f, Pal.text, Fonts.medium)
-            ch.background = box(Pal.panel, 16f, Pal.line, 1)
             ch.setPadding(dp(12), dp(6), dp(12), dp(6))
+            skin(ch, Pal.panel, 3, true, 4f, 2)
             ch.setOnClickListener { lang.setText(name) }
             chips.addView(ch, lp(WRAP, WRAP, 0, 0, 6, 0))
         }
@@ -353,10 +346,10 @@ class MainActivity : Activity() {
         val mode = prefs.mode
         val info = LinearLayout(this)
         info.orientation = LinearLayout.VERTICAL
-        info.background = box(Pal.panel, 8f, Pal.line, 1)
         info.setPadding(dp(16), dp(14), dp(16), dp(14))
+        skin(info, Pal.panel, 5)
         info.addView(tv("Mode aktif", 12f, Pal.dim, Fonts.medium))
-        info.addView(tv(Mode.label(mode), 22f, Pal.accent, Fonts.head))
+        info.addView(tv(Mode.label(mode), 22f, Pal.accent, Fonts.black))
         info.addView(tv(Mode.about(mode), 13f, Pal.text, Fonts.body).also {
             it.setPadding(0, dp(4), 0, dp(10))
             it.setLineSpacing(0f, 1.1f)
@@ -369,9 +362,8 @@ class MainActivity : Activity() {
         logo.setImageResource(R.drawable.logo)
         logo.adjustViewBounds = true
         logo.scaleType = ImageView.ScaleType.FIT_CENTER
-        logo.background = box(Pal.panel, 22f)
-        logo.clipToOutline = true
-        logo.outlineProvider = ViewOutlineProvider.BACKGROUND
+        logo.setPadding(dp(6), dp(6), dp(6), dp(6))
+        skin(logo, Pal.accent, 5)
         logo.layoutParams = LinearLayout.LayoutParams(dp(150), dp(150)).also {
             it.gravity = Gravity.CENTER_HORIZONTAL
             it.bottomMargin = dp(6)

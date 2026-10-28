@@ -29,16 +29,18 @@ class ChatPanel(
 
     init {
         orientation = VERTICAL
-        background = ctx.box(Pal.bg, 14f, Pal.line, 1)
+        setPadding(ctx.dp(3), ctx.dp(3), ctx.dp(3), ctx.dp(3))
+        ctx.skin(this, Pal.panel, 5)
 
         val head = LinearLayout(ctx)
         head.gravity = Gravity.CENTER_VERTICAL
         head.setPadding(ctx.dp(12), ctx.dp(8), ctx.dp(8), ctx.dp(6))
         head.addView(Mark(ctx), ctx.lp(ctx.dp(26), ctx.dp(26), 0, 0, 8, 0))
-        head.addView(ctx.tv("Zero", 19f, Pal.text, Fonts.black), LayoutParams(0, WRAP, 1f))
+        head.addView(ctx.tv("Zero", 20f, Pal.text, Fonts.black), LayoutParams(0, WRAP, 1f))
         head.addView(headAction("Hapus") { clear() })
         head.addView(headAction("Tutup") { onClose() })
         addView(head, LayoutParams(MATCH, WRAP))
+        addView(ctx.rule(3), LayoutParams(MATCH, ctx.dp(3)))
 
         list.orientation = VERTICAL
         list.setPadding(ctx.dp(10), ctx.dp(4), ctx.dp(10), ctx.dp(10))
@@ -61,8 +63,8 @@ class ChatPanel(
         input.inputType = InputType.TYPE_CLASS_TEXT or
             InputType.TYPE_TEXT_FLAG_MULTI_LINE or
             InputType.TYPE_TEXT_FLAG_CAP_SENTENCES
-        input.background = ctx.box(Pal.panel, 10f, Pal.line, 1)
         input.setPadding(ctx.dp(12), ctx.dp(10), ctx.dp(12), ctx.dp(10))
+        ctx.skin(input, Pal.bg, 3)
         row.addView(input, LayoutParams(0, WRAP, 1f))
 
         val send = ctx.button("Kirim", true) { submit() }
@@ -140,8 +142,8 @@ class ChatPanel(
     private fun addUser(text: String, image: Bitmap?) {
         val box = LinearLayout(context)
         box.orientation = VERTICAL
-        box.background = context.corners(Pal.raised, 14f, 14f, 3f, 14f)
         box.setPadding(context.dp(10), context.dp(8), context.dp(10), context.dp(8))
+        context.skin(box, Pal.hi, 3)
         if (image != null) {
             val iv = ImageView(context)
             iv.setImageBitmap(Pix.thumb(image))
@@ -164,8 +166,8 @@ class ChatPanel(
         t.maxWidth = maxBubble()
         t.setLineSpacing(0f, 1.12f)
         t.setTextIsSelectable(true)
-        t.background = context.corners(Pal.panel, 3f, 14f, 14f, 14f)
         t.setPadding(context.dp(12), context.dp(9), context.dp(12), context.dp(9))
+        context.skin(t, Pal.raised, 3)
         val p = context.lp(WRAP, WRAP, 0, 6, 24, 2)
         p.gravity = Gravity.START
         list.addView(t, p)

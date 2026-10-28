@@ -79,6 +79,7 @@ class BrowserActivity : Activity() {
 
         val bar = LinearLayout(this)
         bar.gravity = Gravity.CENTER_VERTICAL
+        bar.setBackgroundColor(Pal.panel)
         bar.setPadding(dp(6), dp(2), dp(6), dp(2))
         bar.addView(barButton("<") { if (web.canGoBack()) web.goBack() })
         bar.addView(barButton(">") { if (web.canGoForward()) web.goForward() })
@@ -88,19 +89,20 @@ class BrowserActivity : Activity() {
         titleView.ellipsize = TextUtils.TruncateAt.END
         titleView.setPadding(dp(8), 0, dp(8), 0)
         bar.addView(titleView, LinearLayout.LayoutParams(0, WRAP, 1f))
-        val modeBtn = tv(Mode.short(prefs.mode), 14f, Pal.accent, Fonts.head)
-        modeBtn.setPadding(dp(12), dp(8), dp(12), dp(8))
-        modeBtn.background = box(Pal.panel, 8f, Pal.line, 1)
-        pressable(modeBtn, 8f)
+        val modeBtn = tv(Mode.short(prefs.mode), 14f, Pal.text, Fonts.head)
+        modeBtn.setPadding(dp(12), dp(7), dp(12), dp(7))
+        skin(modeBtn, Pal.hi, 3, true, 4f, 2)
         modeBtn.setOnClickListener { pickMode() }
         bar.addView(modeBtn)
         root.addView(bar, LinearLayout.LayoutParams(MATCH, WRAP))
+        root.addView(rule(3), LinearLayout.LayoutParams(MATCH, dp(3)))
 
         progress = View(this)
-        progress.setBackgroundColor(Pal.accent)
+        progress.setBackgroundColor(Pal.hi)
         val pw = FrameLayout(this)
+        pw.setBackgroundColor(Pal.line)
         pw.addView(progress, FrameLayout.LayoutParams(0, MATCH))
-        root.addView(pw, LinearLayout.LayoutParams(MATCH, dp(2)))
+        root.addView(pw, LinearLayout.LayoutParams(MATCH, dp(4)))
 
         web = WebView(this)
         configureWeb()
@@ -434,7 +436,7 @@ class BrowserActivity : Activity() {
     private fun pickMode() {
         val ids = arrayOf(Mode.READER, Mode.OVERLAY, Mode.NORMAL)
         val names = Array(ids.size) { Mode.label(ids[it]) }
-        AlertDialog.Builder(this, android.R.style.Theme_Material_Dialog_Alert)
+        AlertDialog.Builder(this, android.R.style.Theme_Material_Light_Dialog_Alert)
             .setTitle("Pilih mode")
             .setItems(names) { _, i -> applyMode(ids[i]) }
             .show()

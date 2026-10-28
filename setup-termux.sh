@@ -28,7 +28,7 @@ git branch -M main
 git remote remove origin 2>/dev/null || true
 if gh repo view "$USERNAME/$REPO" >/dev/null 2>&1; then
   git remote add origin "https://github.com/$USERNAME/$REPO.git"
-  git push -u origin main
+  git push -u origin main || git push -u origin main --force
 else
   gh repo create "$USERNAME/$REPO" --public --source=. --remote=origin --push
 fi

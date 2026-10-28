@@ -1,12 +1,13 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <style name="Theme.Zero" parent="android:Theme.Material.NoActionBar">
+    <style name="Theme.Zero" parent="android:Theme.Material.Light.NoActionBar">
         <item name="android:windowBackground">@color/zero_bg</item>
         <item name="android:statusBarColor">@color/zero_bg</item>
-        <item name="android:navigationBarColor">@color/zero_bg</item>
+        <item name="android:navigationBarColor">@color/zero_ink</item>
+        <item name="android:windowLightStatusBar">true</item>
         <item name="android:colorAccent">@color/zero_accent</item>
         <item name="android:colorPrimary">@color/zero_panel</item>
-        <item name="android:textColorHighlight">#662F7BFF</item>
+        <item name="android:textColorHighlight">#660258F2</item>
     </style>
 
     <style name="Theme.Zero.Clear">

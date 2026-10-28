@@ -7,34 +7,45 @@ import android.view.View
 import kotlin.math.min
 
 class Mark(ctx: Context) : View(ctx) {
-    private val halo = Paint(Paint.ANTI_ALIAS_FLAG)
-    private val disc = Paint(Paint.ANTI_ALIAS_FLAG)
+    private val ink = Paint(Paint.ANTI_ALIAS_FLAG)
+    private val fill = Paint(Paint.ANTI_ALIAS_FLAG)
+    private val edge = Paint(Paint.ANTI_ALIAS_FLAG)
     private val ring = Paint(Paint.ANTI_ALIAS_FLAG)
+    private val slashBack = Paint(Paint.ANTI_ALIAS_FLAG)
     private val slash = Paint(Paint.ANTI_ALIAS_FLAG)
 
     init {
-        halo.style = Paint.Style.FILL
-        halo.color = 0x402F7BFF
-        disc.style = Paint.Style.FILL
-        disc.color = Pal.bg
+        ink.style = Paint.Style.FILL
+        ink.color = Pal.line
+        fill.style = Paint.Style.FILL
+        fill.color = Pal.accent
+        edge.style = Paint.Style.STROKE
+        edge.color = Pal.line
         ring.style = Paint.Style.STROKE
-        ring.color = Pal.accent
+        ring.color = Pal.white
+        slashBack.style = Paint.Style.STROKE
+        slashBack.color = Pal.line
+        slashBack.strokeCap = Paint.Cap.ROUND
         slash.style = Paint.Style.STROKE
-        slash.color = Pal.text
+        slash.color = Pal.hi
         slash.strokeCap = Paint.Cap.ROUND
     }
 
     override fun onDraw(canvas: Canvas) {
         val w = width.toFloat()
         val h = height.toFloat()
-        val s = min(w, h)
-        val cx = w / 2f
-        val cy = h / 2f
-        canvas.drawCircle(cx, cy, s / 2f, halo)
-        canvas.drawCircle(cx, cy, s * 0.44f, disc)
-        ring.strokeWidth = s * 0.09f
-        canvas.drawCircle(cx, cy, s * 0.30f, ring)
-        slash.strokeWidth = s * 0.075f
-        canvas.drawLine(cx - s * 0.18f, cy + s * 0.18f, cx + s * 0.18f, cy - s * 0.18f, slash)
+        val u = min(w, h) / 100f
+        val cx = w / 2f - 3f * u
+        val cy = h / 2f - 3f * u
+        canvas.drawCircle(cx + 6f * u, cy + 6f * u, 42f * u, ink)
+        canvas.drawCircle(cx, cy, 42f * u, fill)
+        edge.strokeWidth = 5f * u
+        canvas.drawCircle(cx, cy, 39.5f * u, edge)
+        ring.strokeWidth = 8f * u
+        canvas.drawCircle(cx, cy, 22f * u, ring)
+        slashBack.strokeWidth = 15f * u
+        canvas.drawLine(cx - 20f * u, cy + 20f * u, cx + 20f * u, cy - 20f * u, slashBack)
+        slash.strokeWidth = 8f * u
+        canvas.drawLine(cx - 20f * u, cy + 20f * u, cx + 20f * u, cy - 20f * u, slash)
     }
 }

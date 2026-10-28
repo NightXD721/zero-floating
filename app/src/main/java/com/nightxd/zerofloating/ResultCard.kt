@@ -37,7 +37,8 @@ class ResultCard(
 
     init {
         orientation = VERTICAL
-        background = ctx.box(Pal.bg, 14f, Pal.line, 1)
+        setPadding(ctx.dp(3), ctx.dp(3), ctx.dp(3), ctx.dp(3))
+        ctx.skin(this, Pal.panel, 5)
 
         val row = LinearLayout(ctx)
         row.gravity = Gravity.CENTER_VERTICAL
@@ -48,6 +49,7 @@ class ResultCard(
         row.addView(shrink)
         row.addView(action("Tutup") { onClose() })
         addView(row, LayoutParams(MATCH, WRAP))
+        addView(ctx.rule(3), LayoutParams(MATCH, ctx.dp(3)))
 
         val cap = (ctx.resources.displayMetrics.heightPixels * (if (fixed) 0.24f else 0.36f)).toInt()
         scroll = CappedScroll(ctx, cap, fixed)

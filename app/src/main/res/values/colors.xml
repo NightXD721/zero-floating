@@ -1,8 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <color name="zero_bg">#07122B</color>
-    <color name="zero_panel">#0E1F45</color>
-    <color name="zero_accent">#2F7BFF</color>
-    <color name="zero_text">#F2F6FF</color>
+    <color name="zero_bg">#EAF1FF</color>
+    <color name="zero_panel">#FFFFFF</color>
+    <color name="zero_accent">#0258F2</color>
+    <color name="zero_text">#0A0A0A</color>
+    <color name="zero_ink">#0A0A0A</color>
     <color name="icon_bg">#0258F2</color>
 </resources>
