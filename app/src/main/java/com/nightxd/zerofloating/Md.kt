@@ -7,15 +7,28 @@ import android.text.style.StyleSpan
 import android.text.style.TypefaceSpan
 
 object Md {
-    private val token = Regex("\\*\\*(.+?)\\*\\*|`([^`]+)`")
+    private val token = Regex("""\*\*(.+?)\*\*|`([^`]+)`|(?<![*\w])\*(?!\s)([^*\n]+?)(?<!\s)\*(?![*\w])""")
     private val heading = Regex("^#{1,6}\\s+")
     private val bullet = Regex("^\\s*[*-]\\s+")
 
-    fun render(src: String): CharSequence {
+    fun render(raw: String): CharSequence {
+        val src = Tex.clean(raw)
         val out = SpannableStringBuilder()
         val lines = src.replace("\r", "").split("\n")
+        var fence = false
         for (i in lines.indices) {
             var line = lines[i]
+            if (line.trim().startsWith("```")) {
+                fence = !fence
+                continue
+            }
+            if (fence) {
+                val s = out.length
+                out.append(line)
+                out.setSpan(TypefaceSpan("monospace"), s, out.length, Spannable.SPAN_EXCLUSIVE_EXCLUSIVE)
+                if (i < lines.size - 1) out.append("\n")
+                continue
+            }
             var isHead = false
             val h = heading.find(line)
             if (h != null) {
@@ -34,9 +47,12 @@ object Md {
                 if (m.groupValues[1].isNotEmpty()) {
                     out.append(m.groupValues[1])
                     out.setSpan(StyleSpan(Typeface.BOLD), s, out.length, Spannable.SPAN_EXCLUSIVE_EXCLUSIVE)
-                } else {
+                } else if (m.groupValues[2].isNotEmpty()) {
                     out.append(m.groupValues[2])
                     out.setSpan(TypefaceSpan("monospace"), s, out.length, Spannable.SPAN_EXCLUSIVE_EXCLUSIVE)
+                } else {
+                    out.append(m.groupValues[3])
+                    out.setSpan(StyleSpan(Typeface.ITALIC), s, out.length, Spannable.SPAN_EXCLUSIVE_EXCLUSIVE)
                 }
                 last = m.range.last + 1
             }

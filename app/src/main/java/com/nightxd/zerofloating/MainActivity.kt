@@ -2,6 +2,7 @@ package com.nightxd.zerofloating
 
 import android.Manifest
 import android.app.Activity
+import android.app.AlertDialog
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.Uri
@@ -105,10 +106,55 @@ class MainActivity : Activity() {
         setContentView(col)
     }
 
+    private fun siteIntent(host: String, path: String): Intent {
+        val u = Uri.Builder().scheme("https").authority(host).path(path).build()
+        return Intent(Intent.ACTION_VIEW, u)
+    }
+
+    private fun tutorial(provider: String) {
+        val google = provider == "google"
+        val title = if (google) "API key gratis Google AI Studio" else "API key gratis Groq"
+        val steps = if (google) {
+            "1. Buka aistudio.google.com/apikey lalu login dengan akun Google.\n" +
+                "2. Tekan Create API key. Pilih atau buat project kalau diminta.\n" +
+                "3. Salin key yang muncul, bentuknya diawali AIza.\n" +
+                "4. Kembali ke Zero Floating, tempel di kolom API key.\n\n" +
+                "Paket gratis ada batas permintaan per menit dan per hari. Kalau kena batas, tunggu sebentar atau ganti model."
+        } else {
+            "1. Buka console.groq.com/keys lalu daftar atau login (Google, GitHub, atau email).\n" +
+                "2. Tekan Create API Key dan beri nama bebas.\n" +
+                "3. Salin key yang muncul, bentuknya diawali gsk_. Key hanya tampil sekali, jadi salin sekarang.\n" +
+                "4. Kembali ke Zero Floating, pilih penyedia Groq, lalu tempel di kolom API key.\n\n" +
+                "Paket gratis ada batas permintaan per menit dan per hari. Model baca gambar hanya sebagian, Zero memilihkan otomatis."
+        }
+        AlertDialog.Builder(this, android.R.style.Theme_Material_Light_Dialog_Alert)
+            .setTitle(title)
+            .setMessage(steps)
+            .setPositiveButton("Buka situs") { _, _ ->
+                try {
+                    startActivity(if (google) siteIntent("aistudio.google.com", "apikey") else siteIntent("console.groq.com", "keys"))
+                } catch (e: Exception) {
+                    Toast.makeText(this, "Tidak bisa membuka browser", Toast.LENGTH_SHORT).show()
+                }
+            }
+            .setNegativeButton("Tutup", null)
+            .show()
+    }
+
+    private fun pickTutorial() {
+        AlertDialog.Builder(this, android.R.style.Theme_Material_Light_Dialog_Alert)
+            .setTitle("Tutorial API key gratis")
+            .setItems(arrayOf("Google AI Studio (Gemini)", "Groq")) { _, i ->
+                tutorial(if (i == 0) "google" else "groq")
+            }
+            .show()
+    }
+
     private fun stepKey() {
-        val key = field("AIza...", prefs.apiKey, Fonts.mono)
+        val groq = prefs.provider == "groq"
+        val key = field(if (groq) "gsk_..." else "AIza...", prefs.apiKey, Fonts.mono)
         key.transformationMethod = PasswordTransformationMethod.getInstance()
-        val model = field(Prefs.DEFAULT_MODEL, prefs.model, Fonts.mono)
+        val model = field(Models.defaultFor(prefs.provider), prefs.model, Fonts.mono)
         val status = tv("", 13f, Pal.dim, Fonts.body)
         var hidden = true
         val show = tv("Tampilkan kunci", 13f, Pal.accent, Fonts.medium)
@@ -119,32 +165,91 @@ class MainActivity : Activity() {
             show.text = if (hidden) "Tampilkan kunci" else "Sembunyikan kunci"
         }
 
+        val content = ArrayList<View>()
+        content.add(tv("Penyedia AI", 13f, Pal.dim, Fonts.medium))
+        val prov = LinearLayout(this)
+        val provs = listOf("google" to "Google AI Studio", "groq" to "Groq")
+        for (i in provs.indices) {
+            val c = tv(provs[i].second, 14f, Pal.text, Fonts.head)
+            c.gravity = Gravity.CENTER
+            c.setPadding(dp(12), dp(10), dp(12), dp(10))
+            skin(c, if (provs[i].first == prefs.provider) Pal.hi else Pal.panel, 3, true, 4f, 2)
+            c.setOnClickListener {
+                prefs.apiKey = key.text.toString()
+                prefs.provider = provs[i].first
+                render()
+            }
+            prov.addView(c, lp(0, WRAP, 0, 0, if (i == 0) 8 else 0, 0).also { it.weight = 1f })
+        }
+        content.add(prov)
+        content.add(tv(if (groq) "API key Groq" else "API key Google AI Studio", 13f, Pal.dim, Fonts.medium))
+        content.add(key)
+        content.add(show)
+        content.add(button("Tutorial bikin API key gratis", false) { pickTutorial() })
+
         val rows = ArrayList<LinearLayout>()
+        var items: List<ModelInfo> = Models.list(prefs.provider)
+        val box = LinearLayout(this)
+        box.orientation = LinearLayout.VERTICAL
+
         fun paintModels() {
             val cur = model.text.toString().trim()
             for (i in rows.indices) {
-                val sel = Models.all[i].id == cur
-                rows[i].background = brut(if (sel) Pal.hi else Pal.panel, 4)
+                if (i < items.size) {
+                    rows[i].background = brut(if (items[i].id == cur) Pal.hi else Pal.panel, 4)
+                }
             }
         }
 
-        val content = ArrayList<View>()
-        content.add(tv("API key Google AI Studio", 13f, Pal.dim, Fonts.medium))
-        content.add(key)
-        content.add(show)
-        content.add(tv("Pilih model (${Models.all.size} tersedia)", 13f, Pal.dim, Fonts.medium))
+        fun fill() {
+            box.removeAllViews()
+            rows.clear()
+            for (m in items) {
+                val row = LinearLayout(this)
+                row.orientation = LinearLayout.VERTICAL
+                row.setPadding(dp(14), dp(10), dp(14), dp(10))
+                row.addView(tv(m.name, 16f, Pal.text, Fonts.head))
+                row.addView(tv(m.id, 12f, Pal.accent, Fonts.mono))
+                row.addView(tv(m.note, 12f, Pal.dim, Fonts.body).also { it.setPadding(0, dp(2), 0, 0) })
+                skin(row, Pal.panel, 4)
+                row.setOnClickListener { model.setText(m.id) }
+                rows.add(row)
+                box.addView(row, lp(MATCH, WRAP, 0, 8, 0, 0))
+            }
+            paintModels()
+        }
 
-        for (m in Models.all) {
-            val row = LinearLayout(this)
-            row.orientation = LinearLayout.VERTICAL
-            row.setPadding(dp(14), dp(10), dp(14), dp(10))
-            skin(row, Pal.panel, 4)
-            row.addView(tv(m.name, 16f, Pal.text, Fonts.head))
-            row.addView(tv(m.id, 12f, Pal.accent, Fonts.mono))
-            row.addView(tv(m.note, 12f, Pal.dim, Fonts.body).also { it.setPadding(0, dp(2), 0, 0) })
-            row.setOnClickListener { model.setText(m.id) }
-            rows.add(row)
-            content.add(row)
+        content.add(tv("Pilih model (" + items.size + " di daftar)", 13f, Pal.dim, Fonts.medium))
+        content.add(box)
+        fill()
+
+        if (groq) {
+            content.add(button("Muat semua model dari akun Groq", false) {
+                val k = key.text.toString().trim()
+                if (k.length < 20) {
+                    status.setTextColor(Pal.danger)
+                    status.text = "Isi API key Groq dulu."
+                } else {
+                    status.setTextColor(Pal.dim)
+                    status.text = "Memuat daftar model..."
+                    Gemini.groqModels(k) { r ->
+                        r.onSuccess { ids ->
+                            val list = ArrayList<ModelInfo>()
+                            for (id in ids) {
+                                list.add(ModelInfo(id, id, if (Models.isVision(id)) "Bisa baca gambar." else "Teks saja."))
+                            }
+                            items = list
+                            fill()
+                            status.setTextColor(Pal.ok)
+                            status.text = "Dimuat " + list.size + " model dari akunmu."
+                        }
+                        r.onFailure {
+                            status.setTextColor(Pal.danger)
+                            status.text = "Gagal: " + (it.message ?: "tidak diketahui")
+                        }
+                    }
+                }
+            })
         }
 
         content.add(tv("Atau ketik ID model sendiri", 13f, Pal.dim, Fonts.medium).also { it.setPadding(0, dp(10), 0, 0) })
@@ -160,9 +265,14 @@ class MainActivity : Activity() {
             override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {
             }
         })
-        paintModels()
+        if (groq) {
+            content.add(
+                tv("Model baca gambar di Groq hanya sebagian. Kalau kamu crop atau terjemah gambar, Zero otomatis memakai model baca gambar.", 12f, Pal.dim, Fonts.note)
+                    .also { it.setPadding(0, dp(10), 0, 0) }
+            )
+        }
         content.add(
-            tv("Kunci hanya tersimpan di perangkat ini dan dikirim langsung ke Google.", 13f, Pal.dim, Fonts.note)
+            tv("Kunci hanya tersimpan di perangkat ini dan dikirim langsung ke penyedia.", 13f, Pal.dim, Fonts.note)
                 .also { it.setPadding(0, dp(12), 0, dp(8)) }
         )
         content.add(status)
@@ -171,12 +281,12 @@ class MainActivity : Activity() {
             val k = key.text.toString().trim()
             if (k.length < 20) {
                 status.setTextColor(Pal.danger)
-                status.text = "API key terlalu pendek. Salin utuh dari Google AI Studio."
+                status.text = "API key terlalu pendek. Salin utuh dari penyedia."
                 return false
             }
             prefs.apiKey = k
             val m = model.text.toString().trim()
-            prefs.model = if (m.isEmpty()) Prefs.DEFAULT_MODEL else m
+            prefs.model = if (m.isEmpty()) Models.defaultFor(prefs.provider) else m
             return true
         }
 
@@ -203,7 +313,7 @@ class MainActivity : Activity() {
         val skip = button("Simpan tanpa tes", false) {
             if (save()) go(STEP_OVERLAY)
         }
-        page(1, "Kunci dan model", "Zero butuh kuncimu sendiri supaya bisa menjawab.", content, listOf(test, skip))
+        page(1, "Kunci dan model", "Pilih Google atau Groq, lalu tempel key gratismu.", content, listOf(test, skip))
     }
 
     private fun stepOverlay() {
@@ -274,12 +384,16 @@ class MainActivity : Activity() {
                 go(STEP_MODE)
             }
         }
-        page(3, "Alamat web", "Situs yang dibuka Zero di dalam aplikasi.", content, listOf(next))
+        val skipUrl = button("Lewati, isi nanti", false) {
+            prefs.url = ""
+            go(STEP_MODE)
+        }
+        page(3, "Alamat web (opsional)", "Hanya untuk mode baca manhwa dan novel atau mode biasa. Mode overlay tidak butuh.", content, listOf(next, skipUrl))
     }
 
     private fun stepMode() {
         val ids = listOf(Mode.READER, Mode.OVERLAY, Mode.NORMAL)
-        var chosen = prefs.mode
+        var chosen = if (prefs.url.isBlank() && prefs.mode != Mode.OVERLAY) Mode.OVERLAY else prefs.mode
         val cards = ArrayList<LinearLayout>()
 
         fun paint() {
@@ -354,7 +468,8 @@ class MainActivity : Activity() {
             it.setPadding(0, dp(4), 0, dp(10))
             it.setLineSpacing(0f, 1.1f)
         })
-        info.addView(tv("Web: " + prefs.url, 13f, Pal.dim, Fonts.mono))
+        info.addView(tv("Penyedia: " + (if (prefs.provider == "groq") "Groq" else "Google AI Studio"), 13f, Pal.dim, Fonts.mono))
+        info.addView(tv("Web: " + (if (prefs.url.isBlank()) "(belum diisi)" else prefs.url), 13f, Pal.dim, Fonts.mono))
         info.addView(tv("Model: " + Models.nameOf(prefs.model), 13f, Pal.dim, Fonts.mono))
         info.addView(tv("Terjemah ke: " + prefs.lang, 13f, Pal.dim, Fonts.mono))
 

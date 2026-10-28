@@ -30,6 +30,7 @@ class ResultCard(
     private val shrink: TextView
     private val scroll: CappedScroll
     private var collapsed = false
+    val handle = LinearLayout(ctx)
     private var text = ""
 
     var busy = false
@@ -40,7 +41,7 @@ class ResultCard(
         setPadding(ctx.dp(3), ctx.dp(3), ctx.dp(3), ctx.dp(3))
         ctx.skin(this, Pal.panel, 5)
 
-        val row = LinearLayout(ctx)
+        val row = handle
         row.gravity = Gravity.CENTER_VERTICAL
         row.setPadding(ctx.dp(14), ctx.dp(4), ctx.dp(6), ctx.dp(0))
         row.addView(head, LayoutParams(0, WRAP, 1f))
@@ -122,7 +123,7 @@ class ResultCard(
         val lang = prefs.lang
         loading("Menerjemahkan ke " + lang)
         val turn = Gemini.Turn("user", Zero.translateImage(lang), bmp)
-        Gemini.stream(prefs, Zero.system(lang), listOf(turn), { p -> partial(lang, p) }, { r -> done(prefs, lang, r) })
+        Gemini.stream(prefs, Zero.system(lang), listOf(turn), { p -> partial(lang, p) }, { r -> done(prefs, lang, r) }, null, true)
     }
 
     fun translateText(prefs: Prefs, source: String) {
@@ -130,6 +131,6 @@ class ResultCard(
         val lang = prefs.lang
         loading("Menerjemahkan ke " + lang)
         val turn = Gemini.Turn("user", Zero.translateText(lang, source))
-        Gemini.stream(prefs, Zero.system(lang), listOf(turn), { p -> partial(lang, p) }, { r -> done(prefs, lang, r) })
+        Gemini.stream(prefs, Zero.system(lang), listOf(turn), { p -> partial(lang, p) }, { r -> done(prefs, lang, r) }, null, true)
     }
 }

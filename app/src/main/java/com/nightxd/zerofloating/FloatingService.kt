@@ -43,6 +43,12 @@ class FloatingService : Service() {
     private var chat: ChatPanel? = null
     private var card: ResultCard? = null
     private var selection: SelectionView? = null
+    private var settings: SettingsPanel? = null
+    private var settingsOn = false
+    private val dimJob = Runnable {
+        val full = prefs.bubbleOpacity / 100f
+        bubble?.alpha = if (prefs.bubbleDim) minOf(full, 0.35f) else full
+    }
     private var panelOn = false
     private var cardOn = false
 
@@ -167,7 +173,7 @@ class FloatingService : Service() {
     }
 
     private fun showBubble() {
-        val size = ui.dp(56)
+        val size = ui.dp(prefs.bubbleSize)
         val v = Mark(ui)
         val s = Screen.real(this)
         val lp = params(size, size, false)
@@ -178,6 +184,7 @@ class FloatingService : Service() {
         if (safeAdd(v, lp)) {
             bubble = v
             bubbleLp = lp
+            wake()
         } else {
             Toast.makeText(this, "Gagal menampilkan bubble", Toast.LENGTH_LONG).show()
             shutdown()
@@ -199,6 +206,7 @@ class FloatingService : Service() {
                     ox = lp.x
                     oy = lp.y
                     moved = false
+                    wake()
                     true
                 }
                 MotionEvent.ACTION_MOVE -> {
@@ -221,11 +229,20 @@ class FloatingService : Service() {
                 }
                 MotionEvent.ACTION_UP -> {
                     if (moved) {
+                        if (prefs.bubbleSnap) {
+                            val sc = Screen.real(this)
+                            lp.x = if (lp.x + lp.width / 2 < sc[0] / 2) 0 else sc[0] - lp.width
+                            try {
+                                wm.updateViewLayout(v, lp)
+                            } catch (ex: Exception) {
+                            }
+                        }
                         prefs.bubbleX = lp.x
                         prefs.bubbleY = lp.y
                     } else {
                         toggleMenu()
                     }
+                    wake()
                     true
                 }
                 else -> false
@@ -250,6 +267,8 @@ class FloatingService : Service() {
             Entry("Tanya layar penuh") { beginCapture(false, K_ASK) },
             Entry("Crop lalu terjemah") { beginCapture(true, K_TR) },
             Entry("Terjemah layar penuh") { beginCapture(false, K_TR) },
+            Entry("Model dan cara kerja") { showSettings(SettingsPanel.MODEL or SettingsPanel.MODE) },
+            Entry("Tampilan bubble") { showSettings(SettingsPanel.BUBBLE) },
             Entry("Matikan bubble", true) { shutdown() }
         )
         val col = ui.menuColumn(items) { hideMenu() }
@@ -277,6 +296,75 @@ class FloatingService : Service() {
         if (safeAdd(col, p)) menu = col
     }
 
+    private fun panelParams(h: Int, yPx: Int, focusable: Boolean): WindowManager.LayoutParams {
+        val s = Screen.real(this)
+        val w = minOf(s[0] - ui.dp(16), ui.dp(560))
+        val p = params(w, h, focusable)
+        p.x = (s[0] - w) / 2
+        p.y = yPx
+        return p
+    }
+
+    private fun dragPanel(handle: View, panel: View, lp: WindowManager.LayoutParams) {
+        var sx = 0f
+        var sy = 0f
+        var ox = 0
+        var oy = 0
+        handle.setOnTouchListener { _, e ->
+            when (e.actionMasked) {
+                MotionEvent.ACTION_DOWN -> {
+                    sx = e.rawX
+                    sy = e.rawY
+                    ox = lp.x
+                    oy = lp.y
+                    true
+                }
+                MotionEvent.ACTION_MOVE -> {
+                    val sc = Screen.real(this)
+                    lp.x = (ox + (e.rawX - sx)).toInt().coerceIn(0, maxOf(0, sc[0] - lp.width))
+                    lp.y = (oy + (e.rawY - sy)).toInt().coerceIn(0, maxOf(0, sc[1] - ui.dp(80)))
+                    try {
+                        wm.updateViewLayout(panel, lp)
+                    } catch (ex: Exception) {
+                    }
+                    true
+                }
+                else -> true
+            }
+        }
+    }
+
+    private fun applyPanels() {
+        val a = prefs.panelOpacity / 100f
+        chat?.alpha = a
+        card?.alpha = a
+        settings?.alpha = a
+    }
+
+    private fun wake() {
+        main.removeCallbacks(dimJob)
+        val full = prefs.bubbleOpacity / 100f
+        bubble?.alpha = full
+        if (prefs.bubbleDim) main.postDelayed(dimJob, 2500)
+    }
+
+    private fun applyBubble() {
+        val v = bubble
+        val lp = bubbleLp
+        if (v != null && lp != null) {
+            val size = ui.dp(prefs.bubbleSize)
+            lp.width = size
+            lp.height = size
+            clampBubble(lp)
+            try {
+                wm.updateViewLayout(v, lp)
+            } catch (e: Exception) {
+            }
+        }
+        wake()
+        applyPanels()
+    }
+
     private fun chatPanel(): ChatPanel {
         val existing = chat
         if (existing != null) return existing
@@ -287,16 +375,18 @@ class FloatingService : Service() {
 
     private fun showPanel(): ChatPanel {
         hideResult()
+        hideSettings()
         val c = chatPanel()
         if (!panelOn) {
             val s = Screen.real(this)
-            val w = minOf(s[0] - ui.dp(16), ui.dp(560))
             val h = (s[1] * (if (s[0] > s[1]) 0.78f else 0.5f)).toInt()
-            val p = params(w, h, true)
-            p.gravity = Gravity.TOP or Gravity.CENTER_HORIZONTAL
-            p.y = ui.dp(44)
+            val p = panelParams(h, ui.dp(44), true)
             p.softInputMode = WindowManager.LayoutParams.SOFT_INPUT_ADJUST_NOTHING
-            if (safeAdd(c, p)) panelOn = true
+            if (safeAdd(c, p)) {
+                panelOn = true
+                dragPanel(c.handle, c, p)
+                applyPanels()
+            }
         }
         return c
     }
@@ -317,14 +407,16 @@ class FloatingService : Service() {
 
     private fun showResult(): ResultCard {
         hidePanel()
+        hideSettings()
         val c = resultCard()
         if (!cardOn) {
             val s = Screen.real(this)
-            val w = minOf(s[0] - ui.dp(16), ui.dp(560))
-            val p = params(w, WindowManager.LayoutParams.WRAP_CONTENT, false)
-            p.gravity = Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL
-            p.y = ui.dp(28)
-            if (safeAdd(c, p)) cardOn = true
+            val p = panelParams(WindowManager.LayoutParams.WRAP_CONTENT, (s[1] * 0.55f).toInt(), false)
+            if (safeAdd(c, p)) {
+                cardOn = true
+                dragPanel(c.handle, c, p)
+                applyPanels()
+            }
         }
         return c
     }
@@ -335,6 +427,29 @@ class FloatingService : Service() {
         cardOn = false
     }
 
+    private fun showSettings(parts: Int) {
+        hidePanel()
+        hideResult()
+        hideSettings()
+        val s = Screen.real(this)
+        val h = (s[1] * (if (s[0] > s[1]) 0.85f else 0.62f)).toInt()
+        val v = SettingsPanel(ui, prefs, parts, { applyBubble() }, { hideSettings() })
+        val p = panelParams(h, ui.dp(44), false)
+        if (safeAdd(v, p)) {
+            settings = v
+            settingsOn = true
+            dragPanel(v.handle, v, p)
+            applyPanels()
+        }
+    }
+
+    private fun hideSettings() {
+        if (!settingsOn) return
+        safeRemove(settings)
+        settings = null
+        settingsOn = false
+    }
+
     private fun beginCapture(area: Boolean, kind: Int) {
         val g = grabber
         if (g == null || !g.active) {
@@ -343,6 +458,7 @@ class FloatingService : Service() {
         }
         hidePanel()
         hideResult()
+        hideSettings()
         if (area) selectArea(kind) else grab(null, kind)
     }
 
@@ -423,6 +539,7 @@ class FloatingService : Service() {
         hideMenu()
         hidePanel()
         hideResult()
+        hideSettings()
         safeRemove(selection)
         selection = null
         safeRemove(bubble)
@@ -435,9 +552,11 @@ class FloatingService : Service() {
 
     override fun onDestroy() {
         running = false
+        main.removeCallbacks(dimJob)
         hideMenu()
         hidePanel()
         hideResult()
+        hideSettings()
         safeRemove(selection)
         safeRemove(bubble)
         grabber?.release()

@@ -15,5 +15,7 @@ Project ada di folder home Termux: ~/ZeroFloating
 Tiap push ke branch main, GitHub Actions membangun APK dan membuat rilis baru dengan nomor naik sendiri.
 
 APK universal, jalan di armeabi-v7a, arm64-v8a, x86 dan x86_64.
-Model default gemini-3.8-flash. Daftar model lengkap ada di langkah pertama aplikasi.
+Penyedia: Google AI Studio (default gemini-3.8-flash) atau Groq (default llama-3.3-70b-versatile).
+Daftar model ada di langkah pertama aplikasi dan lewat menu bubble. Untuk Groq ada tombol Muat semua model dari akun.
+Tutorial bikin API key gratis Google dan Groq ada di langkah pertama aplikasi.
 Keystore penanda tangan ada di folder signing agar update APK tidak minta uninstall.

@@ -109,7 +109,8 @@ class BrowserActivity : Activity() {
         host = FrameLayout(this)
         host.addView(web, FrameLayout.LayoutParams(MATCH, MATCH))
         bubble = Mark(this)
-        host.addView(bubble, FrameLayout.LayoutParams(dp(52), dp(52)))
+        host.addView(bubble, FrameLayout.LayoutParams(dp(prefs.bubbleSize), dp(prefs.bubbleSize)))
+        bubble.alpha = prefs.bubbleOpacity / 100f
         wireBubble()
         root.addView(host, LinearLayout.LayoutParams(MATCH, 0, 1f))
 
@@ -122,6 +123,8 @@ class BrowserActivity : Activity() {
         host.post {
             bubble.x = (host.width - dp(60)).toFloat()
             bubble.y = host.height * 0.5f
+            dock.alpha = prefs.panelOpacity / 100f
+            wake()
         }
         return root
     }
@@ -185,6 +188,7 @@ class BrowserActivity : Activity() {
             override fun onTouch(v: View, e: MotionEvent): Boolean {
                 when (e.actionMasked) {
                     MotionEvent.ACTION_DOWN -> {
+                        wake()
                         offX = v.x - e.rawX
                         offY = v.y - e.rawY
                         sx = e.rawX
@@ -202,7 +206,12 @@ class BrowserActivity : Activity() {
                         }
                     }
                     MotionEvent.ACTION_UP -> {
-                        if (!moved) toggleMenu()
+                        if (!moved) {
+                            toggleMenu()
+                        } else if (prefs.bubbleSnap) {
+                            v.x = if (v.x + v.width / 2f < host.width / 2f) 0f else max(0f, (host.width - v.width).toFloat())
+                        }
+                        wake()
                     }
                 }
                 return true
@@ -232,6 +241,8 @@ class BrowserActivity : Activity() {
                 Entry("Terjemah teks halaman") { translatePageText() },
                 Entry(if (prefs.auto) "Auto terjemah: nyala" else "Auto terjemah: mati") { toggleAuto() },
                 Entry("Tanya Zero") { showChat().focusInput() },
+                Entry("Model dan cara kerja") { showSettings(SettingsPanel.MODEL or SettingsPanel.MODE) },
+                Entry("Tampilan bubble") { showSettings(SettingsPanel.BUBBLE) },
                 Entry("Ganti mode") { pickMode() }
             )
         } else {
@@ -242,6 +253,8 @@ class BrowserActivity : Activity() {
                 Entry("Terjemah layar") { translateScreen() },
                 Entry("Crop lalu terjemah") { startCrop(K_TR) },
                 Entry("Terjemah teks halaman") { translatePageText() },
+                Entry("Model dan cara kerja") { showSettings(SettingsPanel.MODEL or SettingsPanel.MODE) },
+                Entry("Tampilan bubble") { showSettings(SettingsPanel.BUBBLE) },
                 Entry("Ganti mode") { pickMode() }
             )
         }
@@ -296,6 +309,36 @@ class BrowserActivity : Activity() {
             dock.visibility = View.VISIBLE
         }
         return c
+    }
+
+    private fun showSettings(parts: Int) {
+        val v = SettingsPanel(this, prefs, parts, { applyBubble() }, { hideDock() })
+        dock.removeAllViews()
+        val h = (resources.displayMetrics.heightPixels * 0.55f).toInt()
+        dock.addView(v, FrameLayout.LayoutParams(MATCH, h))
+        dock.visibility = View.VISIBLE
+        applyBubble()
+    }
+
+    private fun wake() {
+        main.removeCallbacks(dimJob)
+        bubble.alpha = prefs.bubbleOpacity / 100f
+        if (prefs.bubbleDim) main.postDelayed(dimJob, 2500)
+    }
+
+    private val dimJob = Runnable {
+        val full = prefs.bubbleOpacity / 100f
+        bubble.alpha = if (prefs.bubbleDim) minOf(full, 0.35f) else full
+    }
+
+    private fun applyBubble() {
+        val lpb = bubble.layoutParams
+        lpb.width = dp(prefs.bubbleSize)
+        lpb.height = dp(prefs.bubbleSize)
+        bubble.layoutParams = lpb
+        dock.alpha = prefs.panelOpacity / 100f
+        wake()
+        host.post { clampBubble() }
     }
 
     private fun hideDock() {
