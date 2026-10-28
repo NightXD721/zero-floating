@@ -120,20 +120,30 @@ class ChatPanel(
     private fun dispatch() {
         busy = true
         val pending = addZero("Zero lagi mikir...", Pal.dim)
-        Gemini.ask(prefs, Zero.system(prefs.lang), ArrayList(turns)) { r ->
-            busy = false
-            r.onSuccess { ans ->
-                turns.add(Gemini.Turn("model", ans))
+        Gemini.stream(
+            prefs,
+            Zero.system(prefs.lang),
+            ArrayList(turns),
+            { part ->
                 pending.setTextColor(Pal.text)
-                pending.text = Md.render(ans)
+                pending.text = Md.render(part)
+                scrollDown()
+            },
+            { r ->
+                busy = false
+                r.onSuccess { ans ->
+                    turns.add(Gemini.Turn("model", ans))
+                    pending.setTextColor(Pal.text)
+                    pending.text = Md.render(ans)
+                }
+                r.onFailure { e ->
+                    if (turns.isNotEmpty()) turns.removeAt(turns.size - 1)
+                    pending.setTextColor(Pal.danger)
+                    pending.text = "Gagal: " + (e.message ?: "tidak diketahui")
+                }
+                scrollDown()
             }
-            r.onFailure { e ->
-                if (turns.isNotEmpty()) turns.removeAt(turns.size - 1)
-                pending.setTextColor(Pal.danger)
-                pending.text = "Gagal: " + (e.message ?: "tidak diketahui")
-            }
-            scrollDown()
-        }
+        )
         scrollDown()
     }
 

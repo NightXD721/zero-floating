@@ -31,7 +31,7 @@ object Screen {
 }
 
 object Pix {
-    fun b64(src: Bitmap, maxSide: Int = 2000, quality: Int = 85): String {
+    fun b64(src: Bitmap, maxSide: Int = 1600, quality: Int = 75): String {
         val big = max(src.width, src.height)
         val bmp = if (big > maxSide) {
             val k = maxSide.toFloat() / big.toFloat()

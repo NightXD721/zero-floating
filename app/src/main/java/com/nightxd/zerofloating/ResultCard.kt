@@ -93,6 +93,12 @@ class ResultCard(
         body.text = "Zero lagi bekerja..."
     }
 
+    private fun partial(lang: String, part: String) {
+        head.text = "Menerjemahkan ke " + lang
+        body.setTextColor(Pal.text)
+        body.text = Md.render(part)
+    }
+
     private fun done(lang: String, r: Result<String>) {
         busy = false
         r.onSuccess { out ->
@@ -116,7 +122,7 @@ class ResultCard(
         val lang = prefs.lang
         loading("Menerjemahkan ke " + lang)
         val turn = Gemini.Turn("user", Zero.translateImage(lang), bmp)
-        Gemini.ask(prefs, Zero.system(lang), listOf(turn)) { r -> done(lang, r) }
+        Gemini.stream(prefs, Zero.system(lang), listOf(turn), { p -> partial(lang, p) }, { r -> done(lang, r) })
     }
 
     fun translateText(prefs: Prefs, source: String) {
@@ -124,6 +130,6 @@ class ResultCard(
         val lang = prefs.lang
         loading("Menerjemahkan ke " + lang)
         val turn = Gemini.Turn("user", Zero.translateText(lang, source))
-        Gemini.ask(prefs, Zero.system(lang), listOf(turn)) { r -> done(lang, r) }
+        Gemini.stream(prefs, Zero.system(lang), listOf(turn), { p -> partial(lang, p) }, { r -> done(lang, r) })
     }
 }

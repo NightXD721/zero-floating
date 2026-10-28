@@ -7,7 +7,8 @@ object Zero {
             "Kalau tidak yakin atau datanya tidak ada, katakan terus terang dan jangan mengarang. " +
             "Balas dalam bahasa yang dipakai pengguna. " +
             "Kalau ada gambar, baca isinya dengan teliti sebelum menjawab. " +
-            "Untuk soal hitungan atau logika, kerjakan langkah demi langkah lalu beri hasil akhir yang jelas. " +
+            "Jawab ringkas dan cepat ke inti. Beri penjelasan panjang hanya kalau diminta. " +
+            "Untuk soal hitungan atau logika, tunjukkan langkah singkat lalu hasil akhirnya. " +
             "Gunakan teks biasa, boleh **tebal** dan daftar dengan tanda minus. Jangan pakai emoji. " +
             "Bahasa terjemahan pilihan pengguna adalah " + lang + "."
     }

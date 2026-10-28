@@ -19,15 +19,62 @@ object Gemini {
     private val main = Handler(Looper.getMainLooper())
 
     fun ask(prefs: Prefs, system: String, turns: List<Turn>, done: (Result<String>) -> Unit) {
+        stream(prefs, system, turns, { }, done)
+    }
+
+    fun stream(
+        prefs: Prefs,
+        system: String,
+        turns: List<Turn>,
+        onText: (String) -> Unit,
+        done: (Result<String>) -> Unit
+    ) {
         val key = prefs.apiKey
         val model = prefs.model
         pool.execute {
-            val r = runCatching { call(key, model, system, turns) }
+            val r = runCatching {
+                try {
+                    fetch(key, model, system, turns, true, onText)
+                } catch (e: IOException) {
+                    if (e.message?.contains("thinking", true) == true) {
+                        fetch(key, model, system, turns, false, onText)
+                    } else {
+                        throw e
+                    }
+                }
+            }
             main.post { done(r) }
         }
     }
 
-    private fun call(key: String, modelRaw: String, system: String, turns: List<Turn>): String {
+    private fun thinkingConfig(model: String): JSONObject? {
+        val m = model.lowercase()
+        if (m.startsWith("gemini-2.5-pro")) return null
+        if (m.startsWith("gemini-2.5")) return JSONObject().put("thinkingBudget", 0)
+        return JSONObject().put("thinkingLevel", "low")
+    }
+
+    private fun errorText(code: Int, raw: String): String {
+        val t = raw.trim()
+        val o = try {
+            if (t.startsWith("[")) JSONArray(t).optJSONObject(0) else JSONObject(t)
+        } catch (e: Exception) {
+            null
+        }
+        val msg = o?.optJSONObject("error")?.optString("message", "") ?: ""
+        if (code == 429) return "Kuota API habis atau terlalu sering. Coba lagi sebentar."
+        if (msg.contains("API key", true)) return "API key tidak valid"
+        return if (msg.isNotEmpty()) msg else "HTTP " + code
+    }
+
+    private fun fetch(
+        key: String,
+        modelRaw: String,
+        system: String,
+        turns: List<Turn>,
+        thinking: Boolean,
+        onText: (String) -> Unit
+    ): String {
         if (key.isBlank()) throw IOException("API key belum diisi")
         val model = modelRaw.trim().removePrefix("models/")
 
@@ -52,60 +99,83 @@ object Gemini {
             contents.put(JSONObject().put("role", t.role).put("parts", parts))
         }
         body.put("contents", contents)
+        if (thinking) {
+            val cfg = thinkingConfig(model)
+            if (cfg != null) {
+                body.put("generationConfig", JSONObject().put("thinkingConfig", cfg))
+            }
+        }
 
         val target = Uri.Builder()
             .scheme("https")
             .authority("generativelanguage.googleapis.com")
-            .appendEncodedPath("v1beta/models/" + model + ":generateContent")
+            .appendEncodedPath("v1beta/models/" + model + ":streamGenerateContent")
+            .appendQueryParameter("alt", "sse")
             .build()
             .toString()
 
         val conn = URL(target).openConnection() as HttpURLConnection
         try {
             conn.requestMethod = "POST"
-            conn.connectTimeout = 20000
-            conn.readTimeout = 120000
+            conn.connectTimeout = 15000
+            conn.readTimeout = 60000
             conn.doOutput = true
             conn.setRequestProperty("Content-Type", "application/json")
+            conn.setRequestProperty("Accept-Encoding", "identity")
             conn.setRequestProperty("x-goog-api-key", key)
             conn.outputStream.use { it.write(body.toString().toByteArray(Charsets.UTF_8)) }
 
             val code = conn.responseCode
-            val stream = if (code in 200..299) conn.inputStream else conn.errorStream
-            val raw = stream?.bufferedReader(Charsets.UTF_8)?.use { it.readText() } ?: ""
-
-            val json = try {
-                JSONObject(raw)
-            } catch (e: Exception) {
-                throw IOException("Respons tidak valid (HTTP " + code + ")")
+            if (code !in 200..299) {
+                val raw = conn.errorStream?.bufferedReader(Charsets.UTF_8)?.use { it.readText() } ?: ""
+                throw IOException(errorText(code, raw))
             }
 
-            if (json.has("error")) {
-                val msg = json.optJSONObject("error")?.optString("message", "") ?: ""
-                if (code == 429) throw IOException("Kuota API habis atau terlalu sering. Coba lagi sebentar.")
-                if (msg.contains("API key", true)) throw IOException("API key tidak valid")
-                throw IOException(if (msg.isNotEmpty()) msg else "HTTP " + code)
-            }
-
-            val cands = json.optJSONArray("candidates")
-            if (cands == null || cands.length() == 0) {
-                val why = json.optJSONObject("promptFeedback")?.optString("blockReason", "") ?: ""
-                throw IOException(if (why.isNotEmpty()) "Diblokir: " + why else "Respons kosong")
-            }
-
-            val first = cands.getJSONObject(0)
-            val parts = first.optJSONObject("content")?.optJSONArray("parts")
             val sb = StringBuilder()
-            if (parts != null) {
-                for (i in 0 until parts.length()) {
-                    val p = parts.optJSONObject(i) ?: continue
-                    if (p.optBoolean("thought", false)) continue
-                    sb.append(p.optString("text", ""))
+            var blocked = ""
+            conn.inputStream.bufferedReader(Charsets.UTF_8).use { rd ->
+                while (true) {
+                    val line = rd.readLine() ?: break
+                    if (!line.startsWith("data:")) continue
+                    val payload = line.substring(5).trim()
+                    if (payload.isEmpty() || payload == "[DONE]") continue
+                    val j = try {
+                        JSONObject(payload)
+                    } catch (e: Exception) {
+                        null
+                    }
+                    if (j == null) continue
+                    if (j.has("error")) throw IOException(errorText(code, payload))
+                    val cands = j.optJSONArray("candidates")
+                    if (cands == null || cands.length() == 0) {
+                        val why = j.optJSONObject("promptFeedback")?.optString("blockReason", "") ?: ""
+                        if (why.isNotEmpty()) blocked = why
+                        continue
+                    }
+                    val first = cands.getJSONObject(0)
+                    val parts = first.optJSONObject("content")?.optJSONArray("parts")
+                    var grew = false
+                    if (parts != null) {
+                        for (i in 0 until parts.length()) {
+                            val p = parts.optJSONObject(i) ?: continue
+                            if (p.optBoolean("thought", false)) continue
+                            val piece = p.optString("text", "")
+                            if (piece.isNotEmpty()) {
+                                sb.append(piece)
+                                grew = true
+                            }
+                        }
+                    }
+                    if (grew) {
+                        val snap = sb.toString()
+                        main.post { onText(snap) }
+                    }
                 }
             }
+
             val out = sb.toString().trim()
             if (out.isEmpty()) {
-                throw IOException("Jawaban kosong (" + first.optString("finishReason", "tanpa alasan") + ")")
+                throw IOException(if (blocked.isNotEmpty()) "Diblokir: " + blocked else "Jawaban kosong")
             }
             return out
         } finally {
