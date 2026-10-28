@@ -1,0 +1,429 @@
+package com.nightxd.zerofloating
+
+import android.Manifest
+import android.app.Activity
+import android.content.Intent
+import android.content.pm.PackageManager
+import android.net.Uri
+import android.os.Build
+import android.os.Bundle
+import android.provider.Settings
+import android.text.Editable
+import android.text.InputType
+import android.text.TextWatcher
+import android.text.method.PasswordTransformationMethod
+import android.view.Gravity
+import android.view.View
+import android.view.ViewOutlineProvider
+import android.widget.FrameLayout
+import android.widget.ImageView
+import android.widget.HorizontalScrollView
+import android.widget.LinearLayout
+import android.widget.ScrollView
+import android.widget.Toast
+
+class MainActivity : Activity() {
+
+    private lateinit var prefs: Prefs
+    private var step = STEP_KEY
+    private var fromHome = false
+    private var testing = false
+    private var notifAsked = false
+
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        prefs = Prefs(this)
+        step = if (prefs.setupDone && prefs.apiKey.isNotBlank()) STEP_HOME else STEP_KEY
+        render()
+    }
+
+    override fun onResume() {
+        super.onResume()
+        if (step == STEP_OVERLAY || step == STEP_HOME) render()
+    }
+
+    private fun go(next: Int) {
+        step = if (fromHome) STEP_HOME else next
+        if (step == STEP_HOME) fromHome = false
+        render()
+    }
+
+    private fun edit(target: Int) {
+        fromHome = true
+        step = target
+        render()
+    }
+
+    private fun render() {
+        when (step) {
+            STEP_KEY -> stepKey()
+            STEP_OVERLAY -> stepOverlay()
+            STEP_URL -> stepUrl()
+            STEP_MODE -> stepMode()
+            else -> stepHome()
+        }
+    }
+
+    private fun page(stepNo: Int, title: String, note: String, content: List<View>, footer: List<View>) {
+        val col = LinearLayout(this)
+        col.orientation = LinearLayout.VERTICAL
+        col.setBackgroundColor(Pal.bg)
+        col.setPadding(dp(22), dp(18), dp(22), dp(16))
+
+        val top = LinearLayout(this)
+        top.gravity = Gravity.CENTER_VERTICAL
+        top.addView(Mark(this), lp(dp(44), dp(44), 0, 0, 12, 0))
+        val names = LinearLayout(this)
+        names.orientation = LinearLayout.VERTICAL
+        names.addView(tv("Zero Floating", 21f, Pal.text, Fonts.black))
+        names.addView(tv("asisten yang melayang di atas layarmu", 13f, Pal.dim, Fonts.note))
+        top.addView(names, LinearLayout.LayoutParams(0, WRAP, 1f))
+        col.addView(top, LinearLayout.LayoutParams(MATCH, WRAP))
+
+        if (stepNo > 0) {
+            val bars = LinearLayout(this)
+            for (i in 1..4) {
+                val b = View(this)
+                b.setBackgroundColor(if (i <= stepNo) Pal.accent else Pal.line)
+                bars.addView(b, lp(0, dp(3), 0, 0, if (i < 4) 5 else 0, 0).also { it.weight = 1f })
+            }
+            col.addView(bars, lp(MATCH, WRAP, 0, 20, 0, 0))
+        }
+
+        col.addView(tv(title, 30f, Pal.text, Fonts.head), lp(MATCH, WRAP, 0, 22, 0, 0))
+        col.addView(tv(note, 15f, Pal.dim, Fonts.note).also { it.setLineSpacing(0f, 1.1f) }, lp(MATCH, WRAP, 0, 6, 0, 14))
+
+        val sc = ScrollView(this)
+        val inner = LinearLayout(this)
+        inner.orientation = LinearLayout.VERTICAL
+        for (v in content) {
+            if (v.layoutParams == null) inner.addView(v, lp(MATCH, WRAP, 0, 8, 0, 0)) else inner.addView(v)
+        }
+        sc.addView(inner, FrameLayout.LayoutParams(MATCH, WRAP))
+        col.addView(sc, LinearLayout.LayoutParams(MATCH, 0, 1f))
+
+        for (f in footer) col.addView(f, lp(MATCH, WRAP, 0, 8, 0, 0))
+        setContentView(col)
+    }
+
+    private fun stepKey() {
+        val key = field("AIza...", prefs.apiKey, Fonts.mono)
+        key.transformationMethod = PasswordTransformationMethod.getInstance()
+        val model = field(Prefs.DEFAULT_MODEL, prefs.model, Fonts.mono)
+        val status = tv("", 13f, Pal.dim, Fonts.body)
+        var hidden = true
+        val show = tv("Tampilkan kunci", 13f, Pal.accent, Fonts.medium)
+        show.setPadding(0, dp(8), dp(8), dp(8))
+        show.setOnClickListener {
+            hidden = !hidden
+            key.transformationMethod = if (hidden) PasswordTransformationMethod.getInstance() else null
+            show.text = if (hidden) "Tampilkan kunci" else "Sembunyikan kunci"
+        }
+
+        val rows = ArrayList<LinearLayout>()
+        fun paintModels() {
+            val cur = model.text.toString().trim()
+            for (i in rows.indices) {
+                val sel = Models.all[i].id == cur
+                rows[i].background = box(
+                    if (sel) Pal.raised else Pal.panel, 8f,
+                    if (sel) Pal.accent else Pal.line,
+                    if (sel) 2 else 1
+                )
+            }
+        }
+
+        val content = ArrayList<View>()
+        content.add(tv("API key Google AI Studio", 13f, Pal.dim, Fonts.medium))
+        content.add(key)
+        content.add(show)
+        content.add(tv("Pilih model (${Models.all.size} tersedia)", 13f, Pal.dim, Fonts.medium))
+
+        for (m in Models.all) {
+            val row = LinearLayout(this)
+            row.orientation = LinearLayout.VERTICAL
+            row.setPadding(dp(14), dp(10), dp(14), dp(10))
+            row.addView(tv(m.name, 16f, Pal.text, Fonts.head))
+            row.addView(tv(m.id, 12f, Pal.accent, Fonts.mono))
+            row.addView(tv(m.note, 12f, Pal.dim, Fonts.body).also { it.setPadding(0, dp(2), 0, 0) })
+            row.setOnClickListener { model.setText(m.id) }
+            rows.add(row)
+            content.add(row)
+        }
+
+        content.add(tv("Atau ketik ID model sendiri", 13f, Pal.dim, Fonts.medium).also { it.setPadding(0, dp(10), 0, 0) })
+        content.add(model)
+        model.addTextChangedListener(object : TextWatcher {
+            override fun afterTextChanged(s: Editable?) {
+                paintModels()
+            }
+
+            override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {
+            }
+
+            override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {
+            }
+        })
+        paintModels()
+        content.add(
+            tv("Kunci hanya tersimpan di perangkat ini dan dikirim langsung ke Google.", 13f, Pal.dim, Fonts.note)
+                .also { it.setPadding(0, dp(12), 0, dp(8)) }
+        )
+        content.add(status)
+
+        fun save(): Boolean {
+            val k = key.text.toString().trim()
+            if (k.length < 20) {
+                status.setTextColor(Pal.danger)
+                status.text = "API key terlalu pendek. Salin utuh dari Google AI Studio."
+                return false
+            }
+            prefs.apiKey = k
+            val m = model.text.toString().trim()
+            prefs.model = if (m.isEmpty()) Prefs.DEFAULT_MODEL else m
+            return true
+        }
+
+        val test = button("Tes dan lanjut", true) {
+            if (!testing && save()) {
+                testing = true
+                status.setTextColor(Pal.dim)
+                status.text = "Mengetes " + Models.nameOf(prefs.model) + "..."
+                val turn = Gemini.Turn("user", "Balas satu kata saja: siap")
+                Gemini.ask(prefs, Zero.system(prefs.lang), listOf(turn)) { r ->
+                    testing = false
+                    r.onSuccess {
+                        status.setTextColor(Pal.ok)
+                        status.text = "Tersambung. Zero menjawab: " + it.take(40)
+                        go(STEP_OVERLAY)
+                    }
+                    r.onFailure {
+                        status.setTextColor(Pal.danger)
+                        status.text = "Gagal: " + (it.message ?: "tidak diketahui")
+                    }
+                }
+            }
+        }
+        val skip = button("Simpan tanpa tes", false) {
+            if (save()) go(STEP_OVERLAY)
+        }
+        page(1, "Kunci dan model", "Zero butuh kuncimu sendiri supaya bisa menjawab.", content, listOf(test, skip))
+    }
+
+    private fun stepOverlay() {
+        val granted = Settings.canDrawOverlays(this)
+        if (!notifAsked && Build.VERSION.SDK_INT >= 33 &&
+            checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
+        ) {
+            notifAsked = true
+            requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), 11)
+        }
+        val status = tv(
+            if (granted) "Izin sudah aktif" else "Izin belum diberikan",
+            15f,
+            if (granted) Pal.ok else Pal.danger,
+            Fonts.medium
+        )
+        status.setPadding(0, dp(4), 0, dp(14))
+        val content = listOf<View>(
+            tv(
+                "Dengan izin ini menu mengambang Zero bisa tampil di atas aplikasi lain, lalu kamu tinggal crop bagian layar yang mau ditanyakan.",
+                15f, Pal.text, Fonts.body
+            ).also { it.setLineSpacing(0f, 1.1f) },
+            status,
+            button("Buka pengaturan izin", false) {
+                startActivity(Launch.overlaySettings(this))
+            }
+        )
+        val next = button(if (fromHome) "Selesai" else "Lanjut", true) {
+            if (Settings.canDrawOverlays(this)) {
+                go(STEP_URL)
+            } else {
+                Toast.makeText(this, "Berikan izinnya dulu, atau pilih Lewati", Toast.LENGTH_SHORT).show()
+            }
+        }
+        val skip = button("Lewati dulu", false) { go(STEP_URL) }
+        page(2, "Izin overlay", "Supaya Zero bisa melayang di atas layar.", content, listOf(next, skip))
+    }
+
+    private fun normalize(raw: String): String? {
+        var u = raw.trim()
+        if (u.isEmpty()) return null
+        val hasScheme = u.startsWith("http:", true) || u.startsWith("https:", true)
+        if (!hasScheme) u = "https:" + "/".repeat(2) + u
+        val host = Uri.parse(u).host
+        if (host.isNullOrEmpty()) return null
+        if (!host.contains(".") && host != "localhost") return null
+        return u
+    }
+
+    private fun stepUrl() {
+        val url = field("contoh: situsmanhwa.com", prefs.url, Fonts.mono)
+        url.inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_URI
+        val status = tv("", 13f, Pal.danger, Fonts.body)
+        status.setPadding(0, dp(10), 0, 0)
+        val content = listOf<View>(
+            tv("Alamat web", 13f, Pal.dim, Fonts.medium),
+            url,
+            tv("Boleh tanpa https. Zero menambahkannya sendiri.", 13f, Pal.dim, Fonts.note)
+                .also { it.setPadding(0, dp(10), 0, 0) },
+            status
+        )
+        val next = button(if (fromHome) "Simpan" else "Lanjut", true) {
+            val fixed = normalize(url.text.toString())
+            if (fixed == null) {
+                status.text = "Alamat belum benar. Contoh: situsmanhwa.com"
+            } else {
+                prefs.url = fixed
+                go(STEP_MODE)
+            }
+        }
+        page(3, "Alamat web", "Situs yang dibuka Zero di dalam aplikasi.", content, listOf(next))
+    }
+
+    private fun stepMode() {
+        val ids = listOf(Mode.READER, Mode.OVERLAY, Mode.NORMAL)
+        var chosen = prefs.mode
+        val cards = ArrayList<LinearLayout>()
+
+        fun paint() {
+            for (i in cards.indices) {
+                val sel = ids[i] == chosen
+                cards[i].background = box(
+                    if (sel) Pal.raised else Pal.panel, 8f,
+                    if (sel) Pal.accent else Pal.line,
+                    if (sel) 2 else 1
+                )
+            }
+        }
+
+        val content = ArrayList<View>()
+        for (id in ids) {
+            val c = LinearLayout(this)
+            c.orientation = LinearLayout.VERTICAL
+            c.setPadding(dp(16), dp(14), dp(16), dp(14))
+            c.addView(tv(Mode.label(id), 19f, Pal.text, Fonts.head))
+            c.addView(tv(Mode.about(id), 13f, Pal.dim, Fonts.body).also {
+                it.setPadding(0, dp(4), 0, 0)
+                it.setLineSpacing(0f, 1.1f)
+            })
+            c.setOnClickListener {
+                chosen = id
+                paint()
+            }
+            cards.add(c)
+            val holder = LinearLayout(this)
+            holder.addView(c, LinearLayout.LayoutParams(MATCH, WRAP))
+            content.add(holder)
+            holder.setPadding(0, 0, 0, dp(10))
+        }
+        paint()
+
+        val lang = field("Indonesia", prefs.lang)
+        val chips = LinearLayout(this)
+        for (name in listOf("Indonesia", "Inggris", "Jepang", "Korea", "Mandarin")) {
+            val ch = tv(name, 13f, Pal.text, Fonts.medium)
+            ch.background = box(Pal.panel, 16f, Pal.line, 1)
+            ch.setPadding(dp(12), dp(6), dp(12), dp(6))
+            ch.setOnClickListener { lang.setText(name) }
+            chips.addView(ch, lp(WRAP, WRAP, 0, 0, 6, 0))
+        }
+        val chipScroll = HorizontalScrollView(this)
+        chipScroll.isHorizontalScrollBarEnabled = false
+        chipScroll.addView(chips)
+        content.add(tv("Bahasa terjemahan", 13f, Pal.dim, Fonts.medium).also { it.setPadding(0, dp(8), 0, dp(6)) })
+        content.add(lang)
+        content.add(chipScroll.also { it.setPadding(0, dp(8), 0, dp(8)) })
+
+        val next = button(if (fromHome) "Simpan" else "Simpan dan mulai", true) {
+            prefs.mode = chosen
+            val l = lang.text.toString().trim()
+            prefs.lang = if (l.isEmpty()) "Indonesia" else l
+            prefs.setupDone = true
+            val wasHome = fromHome
+            step = STEP_HOME
+            fromHome = false
+            render()
+            if (!wasHome) Launch.go(this, prefs)
+        }
+        page(4, "Pilih mode", "Bisa diganti kapan saja dari layar utama.", content, listOf(next))
+    }
+
+    private fun stepHome() {
+        val mode = prefs.mode
+        val info = LinearLayout(this)
+        info.orientation = LinearLayout.VERTICAL
+        info.background = box(Pal.panel, 8f, Pal.line, 1)
+        info.setPadding(dp(16), dp(14), dp(16), dp(14))
+        info.addView(tv("Mode aktif", 12f, Pal.dim, Fonts.medium))
+        info.addView(tv(Mode.label(mode), 22f, Pal.accent, Fonts.head))
+        info.addView(tv(Mode.about(mode), 13f, Pal.text, Fonts.body).also {
+            it.setPadding(0, dp(4), 0, dp(10))
+            it.setLineSpacing(0f, 1.1f)
+        })
+        info.addView(tv("Web: " + prefs.url, 13f, Pal.dim, Fonts.mono))
+        info.addView(tv("Model: " + Models.nameOf(prefs.model), 13f, Pal.dim, Fonts.mono))
+        info.addView(tv("Terjemah ke: " + prefs.lang, 13f, Pal.dim, Fonts.mono))
+
+        val logo = ImageView(this)
+        logo.setImageResource(R.drawable.logo)
+        logo.adjustViewBounds = true
+        logo.scaleType = ImageView.ScaleType.FIT_CENTER
+        logo.background = box(Pal.panel, 22f)
+        logo.clipToOutline = true
+        logo.outlineProvider = ViewOutlineProvider.BACKGROUND
+        logo.layoutParams = LinearLayout.LayoutParams(dp(150), dp(150)).also {
+            it.gravity = Gravity.CENTER_HORIZONTAL
+            it.bottomMargin = dp(6)
+        }
+
+        val content = ArrayList<View>()
+        content.add(logo)
+        content.add(info)
+        content.add(button("Ganti mode", false) { edit(STEP_MODE) }.also { lpTop(it) })
+        content.add(button("API key dan model", false) { edit(STEP_KEY) }.also { lpTop(it) })
+        content.add(button("Ubah alamat web", false) { edit(STEP_URL) }.also { lpTop(it) })
+        content.add(button("Izin overlay", false) { edit(STEP_OVERLAY) }.also { lpTop(it) })
+
+        val footer = ArrayList<View>()
+        footer.add(button("Mulai Zero", true) { Launch.go(this, prefs) })
+        if (FloatingService.running) {
+            footer.add(button("Matikan bubble", false) {
+                val i = Intent(this, FloatingService::class.java)
+                i.action = FloatingService.ACTION_STOP
+                startService(i)
+                step = STEP_HOME
+                render()
+            })
+        }
+        page(0, "Siap dipakai", "Zero sudah terhubung. Tinggal mulai.", content, footer)
+    }
+
+    private fun lpTop(v: View) {
+        v.layoutParams = LinearLayout.LayoutParams(MATCH, WRAP).also { it.topMargin = dp(10) }
+    }
+
+    @Deprecated("Deprecated in Java")
+    override fun onBackPressed() {
+        if (step != STEP_HOME && prefs.setupDone && prefs.apiKey.isNotBlank()) {
+            fromHome = false
+            step = STEP_HOME
+            render()
+            return
+        }
+        if (step > STEP_KEY && step != STEP_HOME) {
+            step -= 1
+            render()
+            return
+        }
+        super.onBackPressed()
+    }
+
+    companion object {
+        private const val STEP_KEY = 1
+        private const val STEP_OVERLAY = 2
+        private const val STEP_URL = 3
+        private const val STEP_MODE = 4
+        private const val STEP_HOME = 9
+    }
+}
