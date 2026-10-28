@@ -134,7 +134,7 @@ class ChatPanel(
                 r.onSuccess { ans ->
                     turns.add(Gemini.Turn("model", ans))
                     pending.setTextColor(Pal.text)
-                    pending.text = Md.render(ans)
+                    pending.text = Md.render(ans + Gemini.note(prefs))
                 }
                 r.onFailure { e ->
                     if (turns.isNotEmpty()) turns.removeAt(turns.size - 1)

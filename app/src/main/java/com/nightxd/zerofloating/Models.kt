@@ -20,6 +20,15 @@ object Models {
         ModelInfo("gemini-2.5-flash-lite", "Gemini 2.5 Flash-Lite", "Lama. Akses dibatasi untuk akun yang pernah memakainya.")
     )
 
+    fun fallbacks(id: String): List<String> {
+        val pool = listOf("gemini-3.6-flash", "gemini-3.5-flash-lite", "gemini-3.1-flash-lite")
+        val out = ArrayList<String>()
+        for (m in pool) {
+            if (m != id && out.size < 2) out.add(m)
+        }
+        return out
+    }
+
     fun nameOf(id: String): String {
         for (m in all) {
             if (m.id == id) return m.name

@@ -99,13 +99,13 @@ class ResultCard(
         body.text = Md.render(part)
     }
 
-    private fun done(lang: String, r: Result<String>) {
+    private fun done(prefs: Prefs, lang: String, r: Result<String>) {
         busy = false
         r.onSuccess { out ->
             text = out
             head.text = "Terjemahan ke " + lang
             body.setTextColor(Pal.text)
-            body.text = Md.render(out)
+            body.text = Md.render(out + Gemini.note(prefs))
             expand()
             scroll.scrollTo(0, 0)
         }
@@ -122,7 +122,7 @@ class ResultCard(
         val lang = prefs.lang
         loading("Menerjemahkan ke " + lang)
         val turn = Gemini.Turn("user", Zero.translateImage(lang), bmp)
-        Gemini.stream(prefs, Zero.system(lang), listOf(turn), { p -> partial(lang, p) }, { r -> done(lang, r) })
+        Gemini.stream(prefs, Zero.system(lang), listOf(turn), { p -> partial(lang, p) }, { r -> done(prefs, lang, r) })
     }
 
     fun translateText(prefs: Prefs, source: String) {
@@ -130,6 +130,6 @@ class ResultCard(
         val lang = prefs.lang
         loading("Menerjemahkan ke " + lang)
         val turn = Gemini.Turn("user", Zero.translateText(lang, source))
-        Gemini.stream(prefs, Zero.system(lang), listOf(turn), { p -> partial(lang, p) }, { r -> done(lang, r) })
+        Gemini.stream(prefs, Zero.system(lang), listOf(turn), { p -> partial(lang, p) }, { r -> done(prefs, lang, r) })
     }
 }

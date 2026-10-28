@@ -8,12 +8,16 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.io.IOException
 import java.net.HttpURLConnection
+import java.net.SocketTimeoutException
+import java.net.UnknownHostException
 import java.net.URL
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
 
 object Gemini {
     class Turn(val role: String, val text: String, var image: Bitmap? = null)
+
+    class Busy(msg: String) : IOException(msg)
 
     private val pool: ExecutorService = Executors.newCachedThreadPool()
     private val main = Handler(Looper.getMainLooper())
@@ -30,21 +34,79 @@ object Gemini {
         done: (Result<String>) -> Unit
     ) {
         val key = prefs.apiKey
-        val model = prefs.model
+        val first = prefs.model
         pool.execute {
-            val r = runCatching {
-                try {
-                    fetch(key, model, system, turns, true, onText)
-                } catch (e: IOException) {
-                    if (e.message?.contains("thinking", true) == true) {
-                        fetch(key, model, system, turns, false, onText)
-                    } else {
-                        throw e
-                    }
-                }
-            }
+            val r = runCatching { chain(key, first, system, turns, onText) }
             main.post { done(r) }
         }
+    }
+
+    @Volatile
+    var lastModel = ""
+
+    fun note(prefs: Prefs): String {
+        val used = lastModel
+        if (used.isEmpty() || used == prefs.model) return ""
+        return "\n\nDijawab oleh " + Models.nameOf(used) + " karena " + Models.nameOf(prefs.model) + " sedang sibuk."
+    }
+
+    private fun chain(
+        key: String,
+        first: String,
+        system: String,
+        turns: List<Turn>,
+        onText: (String) -> Unit
+    ): String {
+        val order = ArrayList<String>()
+        order.add(first)
+        order.add(first)
+        for (m in Models.fallbacks(first)) order.add(m)
+        var last = "Server Gemini sedang sibuk. Coba lagi sebentar."
+        var skipSame = false
+        for (i in order.indices) {
+            if (i == 1 && skipSame) continue
+            try {
+                if (i == 1) Thread.sleep(900)
+                val out = attempt(key, order[i], system, turns, onText)
+                lastModel = order[i]
+                return out
+            } catch (e: Busy) {
+                last = e.message ?: last
+            } catch (e: SocketTimeoutException) {
+                last = "Koneksi ke Gemini terlalu lama. Coba lagi."
+                skipSame = true
+            } catch (e: UnknownHostException) {
+                throw IOException("Tidak ada koneksi internet")
+            }
+        }
+        throw IOException(last)
+    }
+
+    private fun attempt(
+        key: String,
+        model: String,
+        system: String,
+        turns: List<Turn>,
+        onText: (String) -> Unit
+    ): String {
+        return try {
+            fetch(key, model, system, turns, true, onText)
+        } catch (e: Busy) {
+            throw e
+        } catch (e: IOException) {
+            if (e.message?.contains("thinking", true) == true) {
+                fetch(key, model, system, turns, false, onText)
+            } else {
+                throw e
+            }
+        }
+    }
+
+    private fun isBusy(code: Int, msg: String): Boolean {
+        if (code == 429 || code >= 500) return true
+        return msg.contains("high demand", true) ||
+            msg.contains("overloaded", true) ||
+            msg.contains("unavailable", true)
     }
 
     private fun thinkingConfig(model: String): JSONObject? {
@@ -117,8 +179,8 @@ object Gemini {
         val conn = URL(target).openConnection() as HttpURLConnection
         try {
             conn.requestMethod = "POST"
-            conn.connectTimeout = 15000
-            conn.readTimeout = 60000
+            conn.connectTimeout = 10000
+            conn.readTimeout = 45000
             conn.doOutput = true
             conn.setRequestProperty("Content-Type", "application/json")
             conn.setRequestProperty("Accept-Encoding", "identity")
@@ -128,7 +190,9 @@ object Gemini {
             val code = conn.responseCode
             if (code !in 200..299) {
                 val raw = conn.errorStream?.bufferedReader(Charsets.UTF_8)?.use { it.readText() } ?: ""
-                throw IOException(errorText(code, raw))
+                val msg = errorText(code, raw)
+                if (isBusy(code, msg)) throw Busy(msg)
+                throw IOException(msg)
             }
 
             val sb = StringBuilder()
@@ -145,7 +209,11 @@ object Gemini {
                         null
                     }
                     if (j == null) continue
-                    if (j.has("error")) throw IOException(errorText(code, payload))
+                    if (j.has("error")) {
+                        val msg = errorText(code, payload)
+                        if (isBusy(0, msg)) throw Busy(msg)
+                        throw IOException(msg)
+                    }
                     val cands = j.optJSONArray("candidates")
                     if (cands == null || cands.length() == 0) {
                         val why = j.optJSONObject("promptFeedback")?.optString("blockReason", "") ?: ""
