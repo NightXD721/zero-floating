@@ -53,6 +53,42 @@ used+=t.length;
 }
 return out;
 };
+Z.scanAll=function(budget){
+var out=[];
+var root=document.body;
+if(!root)return out;
+var w=document.createTreeWalker(root,NodeFilter.SHOW_TEXT,null);
+var c=[];
+var idx=0;
+var x;
+while((x=w.nextNode())){
+idx++;
+if(x.__z)continue;
+var p=x.parentNode;
+if(!p||BAD.test(p.nodeName))continue;
+var s=x.nodeValue;
+if(!s||!/\p{L}/u.test(s))continue;
+if(!p.getBoundingClientRect)continue;
+var r=p.getBoundingClientRect();
+if(r.width===0&&r.height===0)continue;
+c.push([r.top+window.scrollY,x,idx]);
+}
+c.sort(function(a,b){return a[0]-b[0]||a[2]-b[2];});
+var used=0;
+for(var i=0;i<c.length;i++){
+var n=c[i][1];
+var t=n.nodeValue.replace(/^\s+|\s+${'$'}/g,'');
+if(t.length<2){n.__z=1;continue;}
+if(used+t.length>budget&&out.length>0)break;
+n.__z=1;
+var id=Z.n.length;
+Z.n.push(n);
+Z.o.push(n.nodeValue);
+out.push([id,t]);
+used+=t.length;
+}
+return out;
+};
 Z.put=function(a){
 for(var k=0;k<a.length;k++){
 var n=Z.n[a[k][0]];

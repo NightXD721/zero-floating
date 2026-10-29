@@ -1,7 +1,19 @@
 package com.nightxd.zerofloating
 
+import android.Manifest
+import android.content.ClipData
+import android.content.ClipboardManager
 import android.content.Context
+import android.content.Intent
+import android.content.pm.PackageManager
 import android.graphics.Bitmap
+import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
+import android.speech.RecognitionListener
+import android.speech.RecognizerIntent
+import android.speech.SpeechRecognizer
+import android.speech.tts.TextToSpeech
 import android.text.InputType
 import android.view.Gravity
 import android.view.KeyEvent
@@ -14,10 +26,17 @@ import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
 import android.widget.Toast
+import java.util.Locale
 
-private class ZeroMsg(val head: TextView, val think: TextView, val answer: TextView) {
+private class ZeroMsg(
+    val box: LinearLayout,
+    val head: TextView,
+    val think: TextView,
+    val answer: TextView
+) {
     var open = false
     var started = false
+    var raw = ""
 }
 
 class ChatPanel(
@@ -38,6 +57,13 @@ class ChatPanel(
     private val pendRow = LinearLayout(ctx)
     private val pendScroll = HorizontalScrollView(ctx)
     private val pickRow = LinearLayout(ctx)
+    private var lastZero: ZeroMsg? = null
+    private var speech: SpeechRecognizer? = null
+    private var listening = false
+    private var tts: TextToSpeech? = null
+    private var ttsReady = false
+    private val mainH = Handler(Looper.getMainLooper())
+    private lateinit var micBtn: TextView
 
     init {
         orientation = VERTICAL
@@ -83,7 +109,11 @@ class ChatPanel(
         row.setPadding(ctx.dp(8), ctx.dp(6), ctx.dp(8), ctx.dp(8))
         val plus = ctx.button("+", false) { togglePick() }
         plus.setPadding(ctx.dp(14), ctx.dp(8), ctx.dp(14), ctx.dp(8))
-        row.addView(plus, ctx.lp(WRAP, WRAP, 0, 0, 8, 0))
+        row.addView(plus, ctx.lp(WRAP, WRAP, 0, 0, 6, 0))
+
+        micBtn = ctx.button("🎤", false) { toggleVoice() }
+        micBtn.setPadding(ctx.dp(12), ctx.dp(8), ctx.dp(12), ctx.dp(8))
+        row.addView(micBtn, ctx.lp(WRAP, WRAP, 0, 0, 6, 0))
 
         input.hint = "Tanya Zero"
         input.setHintTextColor(Pal.dim)
@@ -100,9 +130,21 @@ class ChatPanel(
 
         val send = ctx.button("Kirim", true) { submit() }
         send.setPadding(ctx.dp(16), ctx.dp(10), ctx.dp(16), ctx.dp(10))
-        row.addView(send, ctx.lp(WRAP, WRAP, 8, 0, 0, 0))
+        row.addView(send, ctx.lp(WRAP, WRAP, 6, 0, 0, 0))
         addView(row, LayoutParams(MATCH, WRAP))
         addView(gripRow, LayoutParams(MATCH, WRAP))
+
+        tts = TextToSpeech(ctx.applicationContext) { status ->
+            ttsReady = status == TextToSpeech.SUCCESS
+            if (ttsReady) {
+                tts?.language = Locale("id", "ID")
+                if (tts?.isLanguageAvailable(Locale("id", "ID")) == TextToSpeech.LANG_MISSING_DATA ||
+                    tts?.isLanguageAvailable(Locale("id", "ID")) == TextToSpeech.LANG_NOT_SUPPORTED
+                ) {
+                    tts?.language = Locale.getDefault()
+                }
+            }
+        }
     }
 
     fun enableResize(): View {
@@ -124,9 +166,21 @@ class ChatPanel(
 
     fun clear() {
         if (busy) return
+        stopVoice()
+        tts?.stop()
         turns.clear()
+        lastZero = null
         list.removeAllViews()
         list.addView(empty)
+    }
+
+    override fun onDetachedFromWindow() {
+        stopVoice()
+        tts?.stop()
+        tts?.shutdown()
+        tts = null
+        ttsReady = false
+        super.onDetachedFromWindow()
     }
 
     private fun togglePick() {
@@ -265,11 +319,17 @@ class ChatPanel(
                 busy = false
                 r.onSuccess { ans ->
                     turns.add(Gemini.Turn("model", ans))
+                    msg.raw = ans
                     msg.answer.setTextColor(Pal.text)
                     msg.answer.text = Md.render(ans + Gemini.note(prefs))
                 }
                 r.onFailure { e ->
-                    if (turns.isNotEmpty()) turns.removeAt(turns.size - 1)
+                    if (turns.isNotEmpty() && turns.last().role == "user") {
+                        // keep user turn so regenerate still works after failure
+                    } else if (turns.isNotEmpty()) {
+                        turns.removeAt(turns.size - 1)
+                    }
+                    msg.raw = ""
                     msg.answer.setTextColor(Pal.danger)
                     msg.answer.text = "Gagal: " + (e.message ?: "tidak diketahui")
                 }
@@ -294,6 +354,24 @@ class ChatPanel(
     }
 
     private fun maxBubble(): Int = (context.resources.displayMetrics.widthPixels * 0.78f).toInt()
+
+    private fun actionBtn(label: String, click: () -> Unit): TextView {
+        val t = context.tv(label, 12f, Pal.accent, Fonts.medium)
+        t.setPadding(context.dp(8), context.dp(4), context.dp(8), context.dp(4))
+        context.pressable(t, 6f)
+        t.setOnClickListener { click() }
+        return t
+    }
+
+    private fun copyText(text: String) {
+        if (text.isBlank()) {
+            Toast.makeText(context, "Tidak ada teks", Toast.LENGTH_SHORT).show()
+            return
+        }
+        val cm = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+        cm.setPrimaryClip(ClipData.newPlainText("Zero", text))
+        Toast.makeText(context, "Disalin", Toast.LENGTH_SHORT).show()
+    }
 
     private fun addUser(text: String, imgs: List<Bitmap>, names: List<String>) {
         val box = LinearLayout(context)
@@ -321,6 +399,11 @@ class ChatPanel(
             t.maxWidth = maxBubble()
             box.addView(t, LayoutParams(WRAP, WRAP))
         }
+        val actions = LinearLayout(context)
+        actions.gravity = Gravity.END
+        actions.setPadding(0, context.dp(4), 0, 0)
+        actions.addView(actionBtn("Salin") { copyText(text) })
+        box.addView(actions, LayoutParams(MATCH, WRAP))
         val p = context.lp(WRAP, WRAP, 24, 6, 0, 2)
         p.gravity = Gravity.END
         list.addView(box, p)
@@ -346,12 +429,154 @@ class ChatPanel(
         box.addView(head, LayoutParams(WRAP, WRAP))
         box.addView(think, LayoutParams(WRAP, WRAP))
         box.addView(answer, LayoutParams(WRAP, WRAP))
-        val m = ZeroMsg(head, think, answer)
+        val m = ZeroMsg(box, head, think, answer)
         head.setOnClickListener { setOpen(m, !m.open) }
+
+        val actions = LinearLayout(context)
+        actions.gravity = Gravity.START
+        actions.setPadding(0, context.dp(6), 0, 0)
+        actions.addView(actionBtn("Salin") { copyText(m.raw.ifBlank { answer.text.toString() }) })
+        actions.addView(actionBtn("Ulangi") { regenerate(m) })
+        actions.addView(actionBtn("Baca") { speak(m.raw.ifBlank { answer.text.toString() }) })
+        box.addView(actions, LayoutParams(MATCH, WRAP))
+
         val p = context.lp(WRAP, WRAP, 0, 6, 24, 2)
         p.gravity = Gravity.START
         list.addView(box, p)
+        lastZero = m
         return m
+    }
+
+    private fun regenerate(m: ZeroMsg) {
+        if (busy) {
+            Toast.makeText(context, "Zero masih menjawab", Toast.LENGTH_SHORT).show()
+            return
+        }
+        if (turns.isEmpty() || turns.last().role != "model") {
+            // last turn should be model; if not, still try
+        }
+        // remove last model turn if present
+        if (turns.isNotEmpty() && turns.last().role == "model") {
+            turns.removeAt(turns.size - 1)
+        }
+        // remove this AI bubble from list
+        list.removeView(m.box)
+        if (lastZero === m) lastZero = null
+        if (turns.isEmpty() || turns.last().role != "user") {
+            Toast.makeText(context, "Tidak ada pertanyaan untuk diulang", Toast.LENGTH_SHORT).show()
+            return
+        }
+        dispatch()
+    }
+
+    private fun speak(text: String) {
+        val plain = text.replace(Regex("[#*`_\\[\\]()]"), " ").replace(Regex("\\s+"), " ").trim()
+        if (plain.isBlank()) {
+            Toast.makeText(context, "Tidak ada teks", Toast.LENGTH_SHORT).show()
+            return
+        }
+        if (!ttsReady || tts == null) {
+            Toast.makeText(context, "Suara belum siap", Toast.LENGTH_SHORT).show()
+            return
+        }
+        tts?.stop()
+        tts?.speak(plain, TextToSpeech.QUEUE_FLUSH, null, "zero-tts")
+    }
+
+    private fun toggleVoice() {
+        if (listening) {
+            stopVoice()
+            return
+        }
+        if (context.checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
+            val act = context as? android.app.Activity
+            if (act != null) {
+                act.requestPermissions(arrayOf(Manifest.permission.RECORD_AUDIO), 71)
+                Toast.makeText(context, "Izinkan mikrofon, lalu tekan 🎤 lagi", Toast.LENGTH_LONG).show()
+            } else {
+                Toast.makeText(context, "Izinkan mikrofon di pengaturan aplikasi dulu", Toast.LENGTH_LONG).show()
+                try {
+                    val i = Intent(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS)
+                    i.data = android.net.Uri.parse("package:" + context.packageName)
+                    context.startActivity(i)
+                } catch (_: Exception) {
+                }
+            }
+            return
+        }
+        if (!SpeechRecognizer.isRecognitionAvailable(context)) {
+            Toast.makeText(context, "Pengenalan suara tidak tersedia di perangkat ini", Toast.LENGTH_SHORT).show()
+            return
+        }
+        startVoice()
+    }
+
+    private fun startVoice() {
+        stopVoice()
+        val sr = SpeechRecognizer.createSpeechRecognizer(context)
+        speech = sr
+        sr.setRecognitionListener(object : RecognitionListener {
+            override fun onReadyForSpeech(params: Bundle?) {
+                listening = true
+                (micBtn as? TextView)?.text = "⏹"
+                Toast.makeText(context, "Mendengarkan...", Toast.LENGTH_SHORT).show()
+            }
+            override fun onBeginningOfSpeech() {}
+            override fun onRmsChanged(rmsdB: Float) {}
+            override fun onBufferReceived(buffer: ByteArray?) {}
+            override fun onEndOfSpeech() {
+                listening = false
+                (micBtn as? TextView)?.text = "🎤"
+            }
+            override fun onError(error: Int) {
+                listening = false
+                (micBtn as? TextView)?.text = "🎤"
+                val msg = when (error) {
+                    SpeechRecognizer.ERROR_NO_MATCH -> "Tidak tertangkap, coba lagi"
+                    SpeechRecognizer.ERROR_SPEECH_TIMEOUT -> "Waktu habis, coba lagi"
+                    SpeechRecognizer.ERROR_NETWORK, SpeechRecognizer.ERROR_NETWORK_TIMEOUT -> "Jaringan gagal"
+                    else -> "Gagal rekam suara"
+                }
+                Toast.makeText(context, msg, Toast.LENGTH_SHORT).show()
+            }
+            override fun onResults(results: Bundle?) {
+                listening = false
+                (micBtn as? TextView)?.text = "🎤"
+                val texts = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
+                val best = texts?.firstOrNull()?.trim().orEmpty()
+                if (best.isNotEmpty()) {
+                    val cur = input.text?.toString().orEmpty()
+                    if (cur.isBlank()) input.setText(best)
+                    else input.setText(cur.trimEnd() + " " + best)
+                    input.setSelection(input.text?.length ?: 0)
+                }
+            }
+            override fun onPartialResults(partialResults: Bundle?) {}
+            override fun onEvent(eventType: Int, params: Bundle?) {}
+        })
+        val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH)
+        intent.putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
+        intent.putExtra(RecognizerIntent.EXTRA_LANGUAGE, "id-ID")
+        intent.putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, false)
+        intent.putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 1)
+        try {
+            sr.startListening(intent)
+        } catch (e: Exception) {
+            Toast.makeText(context, "Gagal mulai mikrofon", Toast.LENGTH_SHORT).show()
+            stopVoice()
+        }
+    }
+
+    private fun stopVoice() {
+        listening = false
+        (micBtn as? TextView)?.text = "🎤"
+        try {
+            speech?.stopListening()
+            speech?.cancel()
+            speech?.destroy()
+        } catch (_: Exception) {
+        }
+        speech = null
     }
 
     private fun scrollDown() {

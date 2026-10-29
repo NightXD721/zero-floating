@@ -22,9 +22,11 @@ import android.view.ViewGroup
 import android.view.inputmethod.InputMethodManager
 import android.webkit.WebChromeClient
 import android.webkit.WebResourceRequest
+import android.webkit.WebResourceResponse
 import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
+import java.io.ByteArrayInputStream
 import android.widget.EditText
 import android.widget.FrameLayout
 import android.widget.LinearLayout
@@ -177,6 +179,75 @@ class BrowserActivity : Activity() {
         return root
     }
 
+    private val adHosts = setOf(
+        // global ad / tracker networks
+        "doubleclick.net", "googlesyndication.com", "googleadservices.com", "googletagservices.com",
+        "googletagmanager.com", "google-analytics.com", "pagead2.googlesyndication.com",
+        "adservice.google.com", "adservice.google.co.id", "ads.google.com",
+        "adnxs.com", "adsrvr.org", "advertising.com", "adform.net", "adcolony.com",
+        "admob.com", "amazon-adsystem.com", "media.net", "outbrain.com", "taboola.com",
+        "criteo.com", "pubmatic.com", "openx.net", "rubiconproject.com", "indexww.com",
+        "moatads.com", "scorecardresearch.com", "quantserve.com", "hotjar.com",
+        "facebook.net", "connect.facebook.net", "fbcdn.net", "pixel.facebook.com",
+        "ads-twitter.com", "analytics.twitter.com", "static.ads-twitter.com",
+        "bidswitch.net", "casalemedia.com", "contextweb.com", "smartadserver.com",
+        "serving-sys.com", "yieldmo.com", "sharethrough.com", "teads.tv",
+        "exelator.com", "bluekai.com", "krxd.net", "demdex.net", "omtrdc.net",
+        "2mdn.net", "adsafeprotected.com", "advertising.com", "adtechus.com",
+        "appnexus.com", "rlcdn.com", "mathtag.com", "agkn.com", "tapad.com",
+        "branch.io", "appsflyer.com", "adjust.com", "kochava.com", "singular.net",
+        "chartbeat.com", "newrelic.com", "nr-data.net", "segment.io", "segment.com",
+        "mixpanel.com", "amplitude.com", "sentry.io", "bugsnag.com",
+        // Indonesia & regional common
+        "ads.indosatooredoo.com", "ads.telkomsel.com", "ad.xl.co.id", "ad.smartfren.com",
+        "ads.detik.com", "adserver.detik.com", "advertising.detik.com",
+        "ads.kompas.com", "ad.kompas.com", "ads.tribunnews.com", "ads.grid.id",
+        "ads.kaskus.co.id", "ad.kaskus.co.id", "ads.liputan6.com", "ads.viva.co.id",
+        "ads.okezone.com", "ads.sindonews.com", "ads.idntimes.com", "ads.tempo.co",
+        "ads.cnnindonesia.com", "ads.kumparan.com", "ads.tirto.id", "ads.republika.co.id",
+        "ads.suara.com", "ads.merdeka.com", "ads.jawapos.com", "ads.pikiran-rakyat.com",
+        "iklan.kompas.com", "iklan.detik.com", "banner.detik.com", "promo.detik.com",
+        "ads.manhwa18.com", "ads.webtoons.com", "ads.mangadex.org", "ads.asurascans.com",
+        "popads.net", "popcash.net", "propellerads.com", "propellerclick.com",
+        "adsterra.com", "adsterra.org", "hilltopads.com", "clickadu.com", "exoclick.com",
+        "juicyads.com", "trafficjunky.com", "ero-advertising.com", "admaven.com",
+        "mgid.com", "revcontent.com", "content.ad", "zergnet.com",
+        "adblade.com", "adskeeper.com", "buysellads.com", "carbonads.com",
+        "ad4game.com", "adsensecustomsearchads.com", "pagead.l.doubleclick.net",
+        "partner.googleadservices.com", "tpc.googlesyndication.com",
+        "securepubads.g.doubleclick.net", "cm.g.doubleclick.net",
+        "fundingchoicesmessages.google.com", "ep2.adtrafficquality.google"
+    )
+
+    private fun isAdHost(host: String?): Boolean {
+        if (host.isNullOrBlank()) return false
+        val h = host.lowercase()
+        if (adHosts.contains(h)) return true
+        for (d in adHosts) {
+            if (h == d || h.endsWith(".$d")) return true
+        }
+        // common patterns
+        if (h.contains("ads.") || h.contains(".ads.") || h.startsWith("ad.") ||
+            h.contains("banner") || h.contains("popup") || h.contains("popunder") ||
+            h.contains("track.") || h.contains("tracker") || h.contains("pixel.") ||
+            h.contains("analytics.") || h.contains("doubleclick") || h.contains("googlesyndication") ||
+            h.contains("pagead") || h.contains("adserver") || h.contains("adserv") ||
+            h.contains("advert") || h.contains("sponsor") || h.contains("promo.")
+        ) {
+            // avoid blocking main content sites that happen to have "ad" in name
+            if (h.contains("google.com") && !h.contains("adservice") && !h.contains("pagead") &&
+                !h.contains("doubleclick") && !h.contains("syndication") && !h.contains("adtraffic")
+            ) return false
+            if (h.endsWith(".google.com") && !h.contains("ads") && !h.contains("pagead")) return false
+            return true
+        }
+        return false
+    }
+
+    private fun emptyResponse(): WebResourceResponse {
+        return WebResourceResponse("text/plain", "utf-8", ByteArrayInputStream(ByteArray(0)))
+    }
+
     private fun configureWeb() {
         val s = web.settings
         s.javaScriptEnabled = true
@@ -193,6 +264,8 @@ class BrowserActivity : Activity() {
         web.webViewClient = object : WebViewClient() {
             override fun shouldOverrideUrlLoading(view: WebView?, request: WebResourceRequest?): Boolean {
                 val u = request?.url ?: return false
+                val host = u.host
+                if (isAdHost(host)) return true
                 val sc = u.scheme
                 if (sc == "http" || sc == "https") return false
                 try {
@@ -202,12 +275,19 @@ class BrowserActivity : Activity() {
                 return true
             }
 
+            override fun shouldInterceptRequest(view: WebView?, request: WebResourceRequest?): WebResourceResponse? {
+                val u = request?.url ?: return super.shouldInterceptRequest(view, request)
+                if (isAdHost(u.host)) return emptyResponse()
+                return super.shouldInterceptRequest(view, request)
+            }
+
             override fun onPageStarted(view: WebView?, url: String?, favicon: Bitmap?) {
                 tr.reset()
             }
 
             override fun onPageFinished(view: WebView?, url: String?) {
                 titleView.text = view?.title ?: url ?: ""
+                injectAdBlock()
                 if (reader && prefs.auto) main.postDelayed({ tr.run() }, 700)
             }
 
@@ -222,6 +302,31 @@ class BrowserActivity : Activity() {
                 val lp = progress.layoutParams
                 lp.width = if (newProgress >= 100) 0 else w * newProgress / 100
                 progress.layoutParams = lp
+            }
+
+            override fun onCreateWindow(
+                view: WebView?, isDialog: Boolean, isUserGesture: Boolean, resultMsg: android.os.Message?
+            ): Boolean {
+                // block all popup / new window (ads often open these)
+                return false
+            }
+
+            override fun onJsAlert(view: WebView?, url: String?, message: String?, result: android.webkit.JsResult?): Boolean {
+                result?.confirm()
+                return true
+            }
+
+            override fun onJsConfirm(view: WebView?, url: String?, message: String?, result: android.webkit.JsResult?): Boolean {
+                result?.cancel()
+                return true
+            }
+
+            override fun onJsPrompt(
+                view: WebView?, url: String?, message: String?, defaultValue: String?,
+                result: android.webkit.JsPromptResult?
+            ): Boolean {
+                result?.cancel()
+                return true
             }
         }
 
@@ -299,6 +404,7 @@ class BrowserActivity : Activity() {
             return listOf(
                 Entry("Deteksi soal") { detectQuestions() },
                 Entry("Tanya Zero") { showChat().focusInput() },
+                Entry("Foto lalu tanya") { showChat().quickPick("camera") },
                 Entry("Model dan cara kerja") { showSettings(SettingsPanel.MODEL or SettingsPanel.MODE) },
                 Entry("Tampilan bubble") { showSettings(SettingsPanel.BUBBLE) },
                 Entry(if (prefs.quiet) "Mode senyap: nyala" else "Mode senyap: mati") { toggleQuiet() },
@@ -307,6 +413,7 @@ class BrowserActivity : Activity() {
         }
         return listOf(
             Entry("Terjemah halaman") { tr.run() },
+            Entry("Terjemah seluruh halaman") { tr.runFull() },
             Entry("Tampilkan asli") { showOriginal() },
             Entry(if (prefs.auto) "Auto terjemah: nyala" else "Auto terjemah: mati") { toggleAuto() },
             Entry("Tanya Zero") { showChat().focusInput() },
@@ -341,6 +448,59 @@ class BrowserActivity : Activity() {
 
     private fun toast(msg: String) {
         Toast.makeText(this, msg, Toast.LENGTH_SHORT).show()
+    }
+
+    private fun injectAdBlock() {
+        val js = """
+(function(){
+  if(window.__zeroAd) return;
+  window.__zeroAd=1;
+  var css = [
+    'iframe[src*="doubleclick"]','iframe[src*="googlesyndication"]','iframe[src*="adservice"]',
+    'iframe[src*="adnxs"]','iframe[src*="adsrvr"]','iframe[src*="popads"]','iframe[src*="popcash"]',
+    'iframe[id*="google_ads"]','iframe[id*="ad-"]','iframe[class*="ads"]','iframe[class*="ad-"]',
+    'div[id*="google_ads"]','div[id*="div-gpt-ad"]','div[class*="adsbygoogle"]',
+    'div[class*="ad-container"]','div[class*="ad-wrapper"]','div[class*="ad-banner"]',
+    'div[class*="advertisement"]','div[class*="sponsor"]','div[data-ad]','div[data-ads]',
+    'ins.adsbygoogle','.adsbygoogle','[id^="ad-"]','[class^="ad-"]','[class*=" ad-"]',
+    '.banner-ad','.ad-banner','.adbox','.ad-unit','.adslot','.adsbox',
+    'a[href*="doubleclick"]','a[href*="googlesyndication"]','a[href*="popads"]',
+    '[onclick*="pop"]','[onclick*="window.open"]'
+  ].join(',') + '{display:none!important;visibility:hidden!important;height:0!important;width:0!important;max-height:0!important;overflow:hidden!important;pointer-events:none!important;}';
+  var st=document.createElement('style');
+  st.id='zero-adblock';
+  st.textContent=css;
+  (document.head||document.documentElement).appendChild(st);
+
+  // remove common popup overlays
+  function killPop(){
+    var sels=['[class*="popup"]','[class*="modal"]','[id*="popup"]','[id*="overlay"]',
+      '[class*="fancybox"]','[class*="lightbox"]','.fc-consent-root','.fc-dialog-container',
+      '#google_ads_iframe','[id*="taboola"]','[id*="outbrain"]','[class*="taboola"]','[class*="outbrain"]'];
+    for(var i=0;i<sels.length;i++){
+      try{
+        var nodes=document.querySelectorAll(sels[i]);
+        for(var j=0;j<nodes.length;j++){
+          var n=nodes[j];
+          var t=(n.innerText||'').toLowerCase();
+          // keep legitimate content modals that look like login/settings
+          if(t.indexOf('login')>=0||t.indexOf('masuk')>=0||t.indexOf('daftar')>=0||t.indexOf('cookie')>=0) continue;
+          if(n.offsetHeight>80||n.querySelector('iframe')) n.style.setProperty('display','none','important');
+        }
+      }catch(e){}
+    }
+  }
+  killPop();
+  setTimeout(killPop,800);
+  setTimeout(killPop,2500);
+
+  // stop window.open used by ads
+  try{
+    window.open=function(){return null;};
+  }catch(e){}
+})();
+""".trimIndent()
+        web.evaluateJavascript(js, null)
     }
 
     private fun hideKeyboard() {
@@ -526,85 +686,148 @@ class BrowserActivity : Activity() {
         val js = """
 (function(){
   function clean(t){return (t||'').replace(/\s+/g,' ').trim();}
-  var out = [];
-  var seen = {};
-  var num = 0;
-  // Google Forms: listitems or data-item-id
-  var items = document.querySelectorAll('[role="listitem"], [data-item-id], .freebirdFormviewerViewItemsItemItem, .Qr7Oae');
-  if (items.length === 0) {
-    // fallback: group by nearby inputs
-    var inputs = document.querySelectorAll('input[type="radio"], input[type="checkbox"], input[type="text"], textarea, select');
-    var groups = {};
-    for (var i=0; i<inputs.length; i++) {
-      var el = inputs[i];
-      var name = el.name || el.id || ('i'+i);
-      if (!groups[name]) groups[name] = {els:[], text:'', type: el.type||'text', opts:[]};
-      groups[name].els.push(el);
-      if (el.type === 'radio' || el.type === 'checkbox') {
-        var lab = el.closest('label') || document.querySelector('label[for="'+el.id+'"]');
-        var ot = clean(lab ? lab.innerText : el.value);
-        if (ot) groups[name].opts.push(ot);
+  function isVisible(el){
+    if(!el||!el.getBoundingClientRect)return false;
+    var r=el.getBoundingClientRect();
+    return r.width>0&&r.height>0;
+  }
+  var out=[];
+  var seen={};
+  var num=0;
+
+  // 1. Prefer Google Forms listitem / data-item-id / freebird
+  var items=document.querySelectorAll('[role="listitem"],[data-item-id],.freebirdFormviewerViewItemsItemItem,.Qr7Oae,.geS5n');
+  if(items.length===0){
+    // broader: any card-like container that has numbered text + choices
+    items=document.querySelectorAll('div[jsname],div[data-params],.freebirdFormviewerViewNumberedItem,.SSPGKf,div');
+  }
+
+  function collectFrom(it, forceText){
+    var txt=forceText||'';
+    if(!txt){
+      var h=it.querySelector('[role="heading"],.M7eMe,.freebirdFormviewerViewItemsItemItemTitle,.ItemTitle,h1,h2,h3,span[role="heading"]');
+      if(h) txt=clean(h.innerText||h.textContent);
+    }
+    if(!txt){
+      // look for "1. " or "1)" style at start of block
+      var raw=clean(it.innerText||'');
+      var m=raw.match(/^(\d+)[\.\)]\s+(.{10,220})/);
+      if(m) txt=m[1]+'. '+m[2];
+      else if(raw.length>12&&raw.length<400) txt=raw.substring(0,220);
+    }
+    if(!txt||seen[txt]) return null;
+    seen[txt]=1;
+
+    var opts=[];
+    var sel='';
+    var typ='esai';
+    var hasImg=it.querySelectorAll('img').length>0;
+
+    // native radios
+    var radios=it.querySelectorAll('input[type="radio"]');
+    // ARIA radios (Google Forms modern)
+    var ariaRadios=it.querySelectorAll('[role="radio"]');
+    // native + aria checkboxes
+    var checks=it.querySelectorAll('input[type="checkbox"],[role="checkbox"]');
+    var texts=it.querySelectorAll('textarea,input[type="text"],input:not([type])');
+
+    if(radios.length>0||ariaRadios.length>0){
+      typ='ganda';
+      var nodes=radios.length>0?radios:ariaRadios;
+      for(var r=0;r<nodes.length;r++){
+        var el=nodes[r];
+        var lab=el.closest('label')||el.closest('[role="listitem"]')||el.parentElement;
+        var ot='';
+        if(lab){
+          ot=clean(lab.innerText||lab.textContent||'');
+          // strip the question text if it leaked
+          if(txt&&ot.indexOf(txt.substring(0,20))===0) ot=clean(ot.substring(txt.length));
+        }
+        if(!ot) ot=clean(el.getAttribute('aria-label')||el.getAttribute('data-value')||el.value||('Opsi '+(r+1)));
+        // prefer short option text like "A. -26"
+        if(ot.length>80) ot=ot.substring(0,80);
+        if(ot) opts.push(ot);
+        if(!sel) sel=el.name||el.id||el.getAttribute('data-value')||('r'+r);
       }
-      var q = el.closest('[role="listitem"], .freebirdFormviewerViewItemsItemItem, div') || el.parentElement;
-      if (q) {
-        var h = q.querySelector('[role="heading"], .freebirdFormviewerViewItemsItemItemTitle, h1, h2, h3, label');
-        if (h) groups[name].text = clean(h.innerText || h.textContent);
+    } else if(checks.length>0){
+      typ='checkbox';
+      for(var c=0;c<checks.length;c++){
+        var el2=checks[c];
+        var lab2=el2.closest('label')||el2.parentElement;
+        var ot2=clean(lab2?(lab2.innerText||lab2.textContent): (el2.getAttribute('aria-label')||el2.value||('Opsi '+(c+1))));
+        if(ot2.length>80) ot2=ot2.substring(0,80);
+        if(ot2) opts.push(ot2);
+        if(!sel) sel=el2.name||el2.id||('c'+c);
+      }
+    } else if(texts.length>0){
+      typ='esai';
+      sel=texts[0].name||texts[0].id||('t'+num);
+    } else {
+      // still accept if it looks like a numbered question even without controls yet
+      if(!/^\d+[\.\)]/.test(txt)) return null;
+      typ='ganda';
+    }
+    num++;
+    return {id:num,num:num,text:txt,type:typ,options:opts,hasImage:hasImg,selector:sel};
+  }
+
+  // First pass: proper containers
+  for(var i=0;i<items.length;i++){
+    var it=items[i];
+    if(!isVisible(it)) continue;
+    // skip tiny or header-only
+    var r=it.getBoundingClientRect();
+    if(r.height<30||r.width<50) continue;
+    var q=collectFrom(it);
+    if(q) out.push(q);
+  }
+
+  // Second pass: if still empty, scan whole body for numbered questions + following A/B/C/D
+  if(out.length===0){
+    var bodyText=document.body?document.body.innerText:'';
+    var blocks=bodyText.split(/\n+/);
+    var cur=null;
+    for(var b=0;b<blocks.length;b++){
+      var line=clean(blocks[b]);
+      if(!line) continue;
+      var qm=line.match(/^(\d+)[\.\)]\s+(.+)/);
+      if(qm){
+        if(cur&&cur.options.length>0){num++;out.push({id:num,num:num,text:cur.text,type:'ganda',options:cur.options,hasImage:false,selector:''});}
+        cur={text:qm[1]+'. '+qm[2],options:[]};
+      } else if(cur){
+        var om=line.match(/^[A-Da-d][\.\)]\s*(.+)/);
+        if(om) cur.options.push(line);
+        else if(/^[A-Da-d]$/.test(line)) cur.options.push(line);
       }
     }
-    for (var k in groups) {
-      var g = groups[k];
-      if (!g.text && g.opts.length===0) continue;
-      num++;
-      var typ = g.type;
-      if (typ === 'radio') typ = 'ganda';
-      else if (typ === 'checkbox') typ = 'checkbox';
-      else if (typ === 'textarea') typ = 'esai';
-      else typ = 'esai';
-      out.push({id:num, num:num, text:g.text||('Soal '+num), type:typ, options:g.opts, hasImage:false, selector:k});
+    if(cur&&cur.options.length>0){num++;out.push({id:num,num:num,text:cur.text,type:'ganda',options:cur.options,hasImage:false,selector:''});}
+  }
+
+  // Third pass: pure input groups if still empty
+  if(out.length===0){
+    var allRadios=document.querySelectorAll('input[type="radio"],[role="radio"]');
+    var groups={};
+    for(var i=0;i<allRadios.length;i++){
+      var el=allRadios[i];
+      var name=el.name||el.getAttribute('aria-labelledby')||('g'+i);
+      if(!groups[name]) groups[name]={opts:[],text:''};
+      var lab=el.closest('label')||el.parentElement;
+      var ot=clean(lab?(lab.innerText||lab.textContent): (el.getAttribute('aria-label')||el.value||''));
+      if(ot) groups[name].opts.push(ot.substring(0,80));
+      var parent=el.closest('[role="listitem"],div');
+      if(parent&&!groups[name].text){
+        var h=parent.querySelector('[role="heading"],span,p,div');
+        if(h) groups[name].text=clean(h.innerText||h.textContent).substring(0,200);
+      }
     }
-  } else {
-    for (var i=0; i<items.length; i++) {
-      var it = items[i];
-      var txt = '';
-      var h = it.querySelector('[role="heading"], .M7eMe, .freebirdFormviewerViewItemsItemItemTitle, .ItemTitle, h1, h2, h3');
-      if (h) txt = clean(h.innerText || h.textContent);
-      if (!txt) {
-        var all = clean(it.innerText || '');
-        if (all.length > 8) txt = all.substring(0, 200);
-      }
-      if (!txt || seen[txt]) continue;
-      seen[txt] = 1;
-      var radios = it.querySelectorAll('input[type="radio"]');
-      var checks = it.querySelectorAll('input[type="checkbox"]');
-      var texts = it.querySelectorAll('input[type="text"], input:not([type]), textarea');
-      var imgs = it.querySelectorAll('img');
-      var typ = 'esai';
-      var opts = [];
-      var sel = '';
-      if (radios.length > 0) {
-        typ = 'ganda';
-        for (var r=0; r<radios.length; r++) {
-          var lab = radios[r].closest('label') || it.querySelector('label[for="'+radios[r].id+'"]');
-          opts.push(clean(lab ? lab.innerText : (radios[r].value||('Opsi '+(r+1)))));
-          if (!sel) sel = radios[r].name || radios[r].id;
-        }
-      } else if (checks.length > 0) {
-        typ = 'checkbox';
-        for (var c=0; c<checks.length; c++) {
-          var lab2 = checks[c].closest('label') || it.querySelector('label[for="'+checks[c].id+'"]');
-          opts.push(clean(lab2 ? lab2.innerText : (checks[c].value||('Opsi '+(c+1)))));
-          if (!sel) sel = checks[c].name || checks[c].id;
-        }
-      } else if (texts.length > 0) {
-        typ = texts[0].tagName === 'TEXTAREA' ? 'esai' : 'esai';
-        sel = texts[0].name || texts[0].id || ('t'+i);
-      } else {
-        continue;
-      }
+    for(var k in groups){
+      var g=groups[k];
+      if(g.opts.length<2) continue;
       num++;
-      out.push({id:num, num:num, text:txt, type:typ, options:opts, hasImage:imgs.length>0, selector:sel});
+      out.push({id:num,num:num,text:g.text||('Soal '+num),type:'ganda',options:g.opts,hasImage:false,selector:k});
     }
   }
+
   return JSON.stringify(out);
 })();
 """.trimIndent()
@@ -639,7 +862,7 @@ class BrowserActivity : Activity() {
                     questions = list
                     selected.clear()
                     if (list.isEmpty()) {
-                        toast("Tidak menemukan soal. Pastikan halaman Form/Docs sudah terbuka penuh.")
+                        toast("Tidak menemukan soal. Scroll halaman penuh lalu coba deteksi lagi.")
                         return@post
                     }
                     showSelectPanel(ganda, esai, gambar)
@@ -762,32 +985,59 @@ class BrowserActivity : Activity() {
             val js = when (q.type) {
                 "ganda", "checkbox" -> """
 (function(){
+  var ans = '$escaped'.toLowerCase().replace(/^\s*[a-d][\.\)]\s*/i,'').trim();
+  var letter = '';
+  var m = '$escaped'.match(/^([a-d])[\.\)]?\s*/i);
+  if (m) letter = m[1].toUpperCase();
+  function clickEl(el){
+    if(!el) return false;
+    el.scrollIntoView({behavior:'smooth',block:'center'});
+    if(el.click) el.click();
+    if(el.checked !== undefined) el.checked = true;
+    el.dispatchEvent(new Event('change',{bubbles:true}));
+    el.dispatchEvent(new MouseEvent('click',{bubbles:true,cancelable:true,view:window}));
+    return true;
+  }
+  // 1. native input by name/id
   var name = '${q.selector}';
-  var ans = '$escaped'.toLowerCase();
-  var els = document.querySelectorAll('input[name="'+name+'"], input[id="'+name+'"]');
-  if (els.length===0) els = document.querySelectorAll('input[type="radio"], input[type="checkbox"]');
-  for (var i=0;i<els.length;i++){
-    var el = els[i];
-    var lab = el.closest('label') || document.querySelector('label[for="'+el.id+'"]');
-    var t = (lab ? lab.innerText : (el.value||'')).toLowerCase();
-    if (t.indexOf(ans) >= 0 || ans.indexOf(t) >= 0 || t === ans) {
-      el.checked = true;
-      el.click();
-      el.dispatchEvent(new Event('change', {bubbles:true}));
-      el.scrollIntoView({behavior:'smooth', block:'center'});
-      return true;
+  var els = name ? document.querySelectorAll('input[name="'+name+'"],input[id="'+name+'"]') : [];
+  if(els.length===0) els = document.querySelectorAll('input[type="radio"],input[type="checkbox"]');
+  for(var i=0;i<els.length;i++){
+    var el=els[i];
+    var lab=el.closest('label')||document.querySelector('label[for="'+el.id+'"]')||el.parentElement;
+    var t=(lab?(lab.innerText||lab.textContent): (el.value||'')).toLowerCase();
+    if(t.indexOf(ans)>=0 || ans.indexOf(t.substring(0,Math.min(20,t.length)))>=0 || (letter && t.indexOf(letter.toLowerCase()+'.')===0)){
+      return clickEl(el);
     }
   }
-  // try by index if answer is A/B/C or 1/2/3
-  var idx = -1;
-  if (/^[a-d]$/i.test(ans)) idx = ans.toUpperCase().charCodeAt(0) - 65;
-  else if (/^\d+$/.test(ans)) idx = parseInt(ans,10) - 1;
-  if (idx >= 0 && els[idx]) {
-    els[idx].checked = true;
-    els[idx].click();
-    els[idx].dispatchEvent(new Event('change', {bubbles:true}));
-    els[idx].scrollIntoView({behavior:'smooth', block:'center'});
-    return true;
+  // 2. ARIA role=radio / checkbox (Google Forms modern)
+  var aria = document.querySelectorAll('[role="radio"],[role="checkbox"]');
+  for(var i=0;i<aria.length;i++){
+    var el=aria[i];
+    var t=(el.getAttribute('aria-label')||el.innerText||el.textContent||'').toLowerCase();
+    var parentTxt=(el.closest('label')||el.parentElement||el).innerText||'';
+    parentTxt=parentTxt.toLowerCase();
+    if(t.indexOf(ans)>=0 || parentTxt.indexOf(ans)>=0 || (letter && (t.indexOf(letter.toLowerCase())===0 || parentTxt.indexOf(letter.toLowerCase()+'.')>=0 || parentTxt.indexOf(letter.toLowerCase()+')')>=0))){
+      return clickEl(el);
+    }
+  }
+  // 3. click any element whose visible text matches option (A. xxx)
+  var all = document.querySelectorAll('label,div,span,li');
+  for(var i=0;i<all.length;i++){
+    var el=all[i];
+    var t=(el.innerText||el.textContent||'').toLowerCase().replace(/\s+/g,' ').trim();
+    if(t.length<2||t.length>120) continue;
+    if(t===ans || t.indexOf(ans)===0 || (letter && (t===letter.toLowerCase() || t.indexOf(letter.toLowerCase()+'.')===0 || t.indexOf(letter.toLowerCase()+')')===0))){
+      return clickEl(el);
+    }
+  }
+  // 4. index fallback A=0 B=1 ...
+  var idx=-1;
+  if(letter) idx=letter.charCodeAt(0)-65;
+  else if(/^\d+$/.test(ans)) idx=parseInt(ans,10)-1;
+  if(idx>=0){
+    var group=document.querySelectorAll('[role="radio"],input[type="radio"]');
+    if(group[idx]) return clickEl(group[idx]);
   }
   return false;
 })();
@@ -796,14 +1046,14 @@ class BrowserActivity : Activity() {
 (function(){
   var name = '${q.selector}';
   var ans = '$escaped';
-  var el = document.querySelector('textarea[name="'+name+'"], input[name="'+name+'"], textarea[id="'+name+'"], input[id="'+name+'"]');
-  if (!el) el = document.querySelector('textarea, input[type="text"]');
-  if (el) {
+  var el = name ? document.querySelector('textarea[name="'+name+'"],input[name="'+name+'"],textarea[id="'+name+'"],input[id="'+name+'"]') : null;
+  if(!el) el = document.querySelector('textarea,input[type="text"]');
+  if(el){
     el.focus();
     el.value = ans;
-    el.dispatchEvent(new Event('input', {bubbles:true}));
-    el.dispatchEvent(new Event('change', {bubbles:true}));
-    el.scrollIntoView({behavior:'smooth', block:'center'});
+    el.dispatchEvent(new Event('input',{bubbles:true}));
+    el.dispatchEvent(new Event('change',{bubbles:true}));
+    el.scrollIntoView({behavior:'smooth',block:'center'});
     return true;
   }
   return false;

@@ -20,10 +20,13 @@ Zero Floating adalah asisten AI bernama Zero yang melayang di atas layar HP. Gun
 - Bubble melayang yang bisa digeser, dengan pengaturan transparansi, ukuran, tempel ke tepi, dan redup saat diam.
 - Tanya lewat foto kamera, atau lewat crop layar dan layar penuh di mode Overlay.
 - Terjemah langsung di tempat pada mode Baca: teks web dan teks di dalam gambar manhwa diganti ke bahasa pilihanmu, bisa dikembalikan ke asli kapan saja.
+- Terjemah seluruh halaman: satu klik semua teks di halaman diganti terjemahan (tidak perlu scroll manual).
 - Auto terjemah saat berhenti scroll di mode Baca.
+- Proteksi iklan di mode Baca (dan Isi Form): blokir domain iklan global + Indonesia, cegah popup/redirect, sembunyikan elemen iklan.
 - Terjemah crop atau layar penuh di mode Overlay, dengan bahasa tujuan yang bisa dipilih.
 - Terjemah gambar paling akurat memakai Gemini. Groq tetap bisa, tapi kurang stabil.
 - Lampiran chat: galeri, kamera, dan file (gambar, PDF, teks, kode).
+- Tombol Salin (pesan user & jawaban AI), Ulangi jawaban, Baca suara (TTS), dan input suara (voice note / mikrofon).
 - Cara kerja Cepat, Sedang, Tinggi, dan mode berpikir yang prosesnya bisa dilihat.
 - Panel chat dan kartu terjemahan yang bisa digeser dan diubah ukurannya di mode Overlay dan Baca.
 - Tampilan rapi untuk matematika, kimia, fisika, tabel, kutipan, dan blok kode.

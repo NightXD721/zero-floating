@@ -25,6 +25,7 @@ class PageTranslator(
     private var jobs = 0
     private var textBusy = false
     private var imgBusy = false
+    private var fullBusy = false
     private var lastErr = 0L
     private var warned = false
 
@@ -33,6 +34,7 @@ class PageTranslator(
         jobs = 0
         textBusy = false
         imgBusy = false
+        fullBusy = false
         layer.clear()
         onState(false)
     }
@@ -50,6 +52,100 @@ class PageTranslator(
     fun run() {
         text(0)
         images()
+    }
+
+    /** Translate every text node on the page (not just near viewport). Multi-pass until empty. */
+    fun runFull() {
+        fullRound(0)
+        images()
+    }
+
+    private fun fullRound(round: Int) {
+        if (fullBusy && round == 0) return
+        fullBusy = true
+        val ep = epoch
+        val budget = if (round == 0) FULL_BUDGET else FULL_BUDGET
+        web.evaluateJavascript(PageJs.INSTALL + "window.__zero.scanAll(" + budget + ")") { raw ->
+            if (ep != epoch) {
+                fullBusy = false
+                return@evaluateJavascript
+            }
+            val arr = try {
+                JSONArray(raw ?: "[]")
+            } catch (e: Exception) {
+                null
+            }
+            if (arr == null || arr.length() == 0) {
+                fullBusy = false
+                if (round > 0) {
+                    act.runOnUiThread {
+                        Toast.makeText(act, "Terjemah seluruh halaman selesai", Toast.LENGTH_SHORT).show()
+                    }
+                }
+                return@evaluateJavascript
+            }
+            act.runOnUiThread {
+                if (round == 0) Toast.makeText(act, "Menerjemahkan seluruh halaman...", Toast.LENGTH_SHORT).show()
+            }
+            // reuse batching from onScan path by temporarily calling similar logic
+            onFullScan(ep, round, arr)
+        }
+    }
+
+    private fun onFullScan(ep: Int, round: Int, arr: JSONArray) {
+        if (ep != epoch) {
+            fullBusy = false
+            return
+        }
+        val lang = prefs.lang
+        val batches = ArrayList<ArrayList<Int>>()
+        var cur = ArrayList<Int>()
+        var size = 0
+        for (k in 0 until arr.length()) {
+            val len = arr.getJSONArray(k).getString(1).length
+            val limChars = BATCH_CHARS
+            val limNodes = BATCH_NODES
+            if (cur.isNotEmpty() && (size + len > limChars || cur.size >= limNodes)) {
+                batches.add(cur)
+                cur = ArrayList()
+                size = 0
+            }
+            cur.add(k)
+            size += len
+        }
+        if (cur.isNotEmpty()) batches.add(cur)
+
+        var left = batches.size
+        if (left == 0) {
+            fullBusy = false
+            return
+        }
+        var allOk = true
+        for (b in batches) {
+            val ids = JSONArray()
+            val src = JSONArray()
+            for (k in b) {
+                val row = arr.getJSONArray(k)
+                ids.put(row.getInt(0))
+                src.put(row.getString(1))
+            }
+            send(ep, lang, ids, src, 0, BooleanArray(ids.length())) { ok ->
+                if (ep == epoch) {
+                    if (!ok) allOk = false
+                    left--
+                    if (left == 0) {
+                        if (allOk && round < FULL_MAX_ROUNDS) {
+                            fullRound(round + 1)
+                        } else {
+                            fullBusy = false
+                            act.runOnUiThread {
+                                Toast.makeText(act, "Terjemah seluruh halaman selesai", Toast.LENGTH_SHORT).show()
+                            }
+                        }
+                    }
+                }
+            }
+        }
     }
 
     private fun script(body: String) {
@@ -381,6 +477,8 @@ class PageTranslator(
 
     companion object {
         private const val TEXT_BUDGET = 8000
+        private const val FULL_BUDGET = 14000
+        private const val FULL_MAX_ROUNDS = 8
         private const val FIRST_CHARS = 700
         private const val FIRST_NODES = 14
         private const val BATCH_CHARS = 2200
