@@ -543,13 +543,28 @@ class BrowserActivity : Activity() {
 
     private fun wake() {
         main.removeCallbacks(dimJob)
-        bubble.alpha = prefs.bubbleOpacity / 100f
-        if (prefs.bubbleDim || prefs.quiet) main.postDelayed(dimJob, 2500)
+        val full = prefs.bubbleOpacity / 100f
+        // restore visible while user interacts
+        bubble.alpha = full.coerceAtLeast(0.15f)
+        bubble.visibility = View.VISIBLE
+        if (prefs.quiet) {
+            // hide quickly after use so mode senyap works in Baca/Isi too
+            main.postDelayed(dimJob, 1200)
+        } else if (prefs.bubbleDim) {
+            main.postDelayed(dimJob, 2500)
+        }
     }
 
     private val dimJob = Runnable {
         val full = prefs.bubbleOpacity / 100f
-        bubble.alpha = if (prefs.quiet) 0f else if (prefs.bubbleDim) minOf(full, 0.35f) else full
+        if (prefs.quiet) {
+            // almost invisible but still tappable
+            bubble.alpha = 0.04f
+        } else if (prefs.bubbleDim) {
+            bubble.alpha = minOf(full, 0.35f)
+        } else {
+            bubble.alpha = full
+        }
     }
 
     private fun applyBubble() {
@@ -707,6 +722,15 @@ class BrowserActivity : Activity() {
     private fun toggleQuiet() {
         prefs.quiet = !prefs.quiet
         Quiet.sync(this)
+        main.removeCallbacks(dimJob)
+        if (prefs.quiet) {
+            // apply immediately in Baca / Isi (bukan cuma Overlay)
+            bubble.alpha = 0.04f
+            toast("Mode senyap: nyala (bubble hampir hilang, tetap bisa disentuh)")
+        } else {
+            bubble.alpha = prefs.bubbleOpacity / 100f
+            toast("Mode senyap: mati")
+        }
         wake()
     }
 
@@ -1068,46 +1092,51 @@ class BrowserActivity : Activity() {
         if (toFill.isEmpty()) return
         toast("AI sedang menjawab ${toFill.size} soal...")
         val sb = StringBuilder()
-        sb.append("Jawab soal berikut. Balas HANYA JSON array valid tanpa markdown.\n")
+        sb.append("Jawab soal berikut dengan teliti (hitung ulang). Balas HANYA JSON array valid tanpa markdown.\n")
         sb.append("Format: [{\"num\":1,\"type\":\"ganda\",\"answer\":\"...\"},{\"num\":2,\"type\":\"esai\",\"answer\":\"...\"}]\n")
         sb.append("Aturan answer:\n")
-        sb.append("- Pilihan ganda BERHURUF (A/B/C/D): isi huruf saja, contoh \"A\" atau \"C\".\n")
-        sb.append("- Pilihan ganda TANPA huruf (teks opsi langsung): isi TEKS OPSI PERSIS seperti di daftar, contoh \"1.875 buah\".\n")
-        sb.append("- Esai: isi jawaban teks lengkap yang akan diketik ke kotak isian.\n\n")
+        sb.append("- Pilihan ganda BERHURUF (A/B/C/D): isi huruf saja, contoh \"A\".\n")
+        sb.append("- Pilihan ganda TEKS (tanpa A/B/C/D): isi TEKS OPSI PERSIS, contoh \"1.875 buah\".\n")
+        sb.append("- Esai: teks jawaban lengkap.\n")
+        sb.append("- Jika ada gambar di screenshot, pakai gambar itu untuk menjawab.\n\n")
         for (q in toFill) {
             sb.append("Soal ${q.num} (${q.type}): ${q.text}\n")
             if (q.options.isNotEmpty()) {
                 sb.append("Opsi:\n")
                 for (op in q.options) sb.append("  - ").append(op).append("\n")
             }
-            if (q.hasImage) sb.append("(soal ini punya gambar)\n")
+            if (q.hasImage) sb.append("(lihat gambar di screenshot)\n")
             sb.append("\n")
         }
-        val turn = Gemini.Turn("user", sb.toString())
-        Gemini.ask(
-            prefs,
-            "Kamu asisten ujian akurat. Untuk ganda berhuruf jawab huruf; untuk ganda berteks jawab teks opsi persis; untuk esai jawab teks lengkap. Hanya output JSON array.",
-            listOf(turn)
-        ) { result ->
-            result.onSuccess { text ->
-                main.post {
-                    try {
-                        val clean = text.trim().removePrefix("```json").removePrefix("```").removeSuffix("```").trim()
-                        val arr = JSONArray(clean)
-                        val answers = HashMap<Int, String>()
-                        for (i in 0 until arr.length()) {
-                            val o = arr.getJSONObject(i)
-                            answers[o.optInt("num")] = o.optString("answer", "")
+        fun runAsk(bmp: Bitmap?) {
+            val turn = Gemini.Turn("user", sb.toString(), bmp)
+            Gemini.ask(
+                prefs,
+                "Kamu asisten ujian akurat. Hitung dengan benar. Ganda berhuruf → huruf; ganda berteks → teks opsi persis; esai → teks. Hanya JSON array.",
+                listOf(turn)
+            ) { result ->
+                result.onSuccess { text ->
+                    main.post {
+                        try {
+                            val clean = text.trim().removePrefix("```json").removePrefix("```").removeSuffix("```").trim()
+                            val arr = JSONArray(clean)
+                            val answers = HashMap<Int, String>()
+                            for (i in 0 until arr.length()) {
+                                val o = arr.getJSONObject(i)
+                                answers[o.optInt("num")] = o.optString("answer", "")
+                            }
+                            applyAnswers(toFill, answers)
+                        } catch (e: Exception) {
+                            toast("Gagal parse jawaban AI: ${e.message}")
                         }
-                        applyAnswers(toFill, answers)
-                    } catch (e: Exception) {
-                        toast("Gagal parse jawaban AI: ${e.message}")
                     }
+                }.onFailure { e ->
+                    main.post { toast("Gagal AI: ${e.message}") }
                 }
-            }.onFailure { e ->
-                main.post { toast("Gagal AI: ${e.message}") }
             }
         }
+        // selalu kirim screenshot halaman agar soal gambar (geometri dll) terbaca
+        captureWeb { bmp -> runAsk(bmp) }
     }
 
     private fun applyAnswers(qs: List<FormQuestion>, answers: Map<Int, String>) {
