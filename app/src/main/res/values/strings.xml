@@ -1,4 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">Zero Floating</string>
+    <string name="access_desc">Zero memakai layanan aksesibilitas untuk mendeteksi dan mengisi soal Google Form di Chrome atau aplikasi lain dari mode Overlay. Hanya dipakai saat kamu menekan Deteksi &amp; isi soal.</string>
 </resources>

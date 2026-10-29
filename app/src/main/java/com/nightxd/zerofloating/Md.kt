@@ -16,27 +16,35 @@ object Md {
     private val bullet = Regex("^(\\s*)[*-]\\s+")
     private val rule = Regex("^\\s*([-*_])\\1{2,}\\s*$")
     private val quote = Regex("^\\s*>\\s?")
-    private val tableSep = Regex("^[\\s:|-]+$")
+    private val tableSep = Regex("^[\\s|:\\-]+$")
 
     private fun mono(out: SpannableStringBuilder, start: Int, bg: Boolean) {
         out.setSpan(TypefaceSpan("monospace"), start, out.length, Spannable.SPAN_EXCLUSIVE_EXCLUSIVE)
         if (bg) out.setSpan(BackgroundColorSpan(Pal.panel), start, out.length, Spannable.SPAN_EXCLUSIVE_EXCLUSIVE)
     }
 
+    private fun stripMd(s: String): String {
+        return s.replace("**", "").replace("__", "").replace("`", "").replace("*", "").trim()
+    }
+
     private fun table(block: List<String>, out: SpannableStringBuilder) {
         val rows = ArrayList<List<String>>()
         for (l in block) {
             val t = l.trim()
-            if (t.contains("-") && tableSep.matches(t)) continue
+            // skip separator like | :--- | :--- |
+            val bare = t.replace("|", "").replace(":", "").replace("-", "").replace(" ", "")
+            if (bare.isEmpty() && t.contains("-")) continue
+            if (tableSep.matches(t.replace("|", " "))) continue
             val cells = t.removePrefix("|").removeSuffix("|").split("|")
-            rows.add(cells.map { it.trim().replace("**", "").replace("`", "") })
+            rows.add(cells.map { stripMd(it) })
         }
         if (rows.isEmpty()) return
         var cols = 0
         for (r in rows) cols = max(cols, r.size)
+        if (cols == 0) return
         val w = IntArray(cols)
         for (r in rows) {
-            for (c in r.indices) w[c] = max(w[c], r[c].length)
+            for (c in r.indices) w[c] = max(w[c], r[c].length.coerceAtMost(28))
         }
         val start = out.length
         var total = 0
@@ -45,18 +53,18 @@ object Md {
         for (ri in rows.indices) {
             val sb = StringBuilder()
             for (c in 0 until cols) {
-                val cell = if (c < rows[ri].size) rows[ri][c] else ""
+                val cell = if (c < rows[ri].size) rows[ri][c].take(28) else ""
                 sb.append(cell.padEnd(w[c]))
-                if (c < cols - 1) sb.append(" | ")
+                if (c < cols - 1) sb.append(" │ ")
             }
             out.append(sb.toString().trimEnd())
             if (ri == 0 && rows.size > 1) {
                 out.append("\n")
-                out.append("-".repeat(total))
+                out.append("─".repeat(total.coerceAtMost(80)))
             }
             if (ri < rows.size - 1) out.append("\n")
         }
-        mono(out, start, false)
+        mono(out, start, true)
     }
 
     fun render(raw: String): CharSequence {

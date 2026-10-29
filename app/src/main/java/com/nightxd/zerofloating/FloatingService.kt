@@ -281,6 +281,7 @@ class FloatingService : Service() {
     private fun showMenu() {
         val lpB = bubbleLp ?: return
         val items = listOf(
+            Entry("Deteksi & isi soal") { startOverlayFill() },
             Entry("Tanya Zero") { showPanel() },
             Entry("Foto lalu tanya") { showPanel().quickPick("camera") },
             Entry("Crop lalu tanya") { beginCapture(true, K_ASK) },
@@ -573,6 +574,114 @@ class FloatingService : Service() {
         safeRemove(settings)
         settings = null
         settingsOn = false
+    }
+
+    private fun startOverlayFill() {
+        if (!ZeroAccess.enabled(this)) {
+            Toast.makeText(this, "Aktifkan layanan aksesibilitas Zero dulu (untuk klik di Chrome)", Toast.LENGTH_LONG).show()
+            ZeroAccess.openSettings(this)
+            return
+        }
+        val g = grabber
+        if (g == null || !g.active) {
+            Toast.makeText(this, "Tangkap layar belum aktif. Mulai ulang dari aplikasi Zero.", Toast.LENGTH_LONG).show()
+            return
+        }
+        hideMenu()
+        hidePanel()
+        hideResult()
+        hideSettings()
+        bubble?.visibility = View.INVISIBLE
+        Toast.makeText(this, "Mendeteksi soal di layar...", Toast.LENGTH_SHORT).show()
+        main.postDelayed({
+            g.grab { bmp ->
+                bubble?.visibility = View.VISIBLE
+                if (bmp == null) {
+                    Toast.makeText(this, "Gagal tangkap layar", Toast.LENGTH_SHORT).show()
+                    return@grab
+                }
+                val prompt = """
+Analisis screenshot form/ujian ini.
+Balas HANYA JSON array tanpa markdown:
+[{"num":1,"type":"ganda","text":"ringkasan soal","options":["A. ...","B. ..."],"answer":"A"},{"num":2,"type":"esai","text":"...","options":[],"answer":"jawaban singkat"}]
+Untuk pilihan ganda, answer harus huruf A/B/C/D saja.
+Sertakan semua soal yang terlihat di layar.
+""".trimIndent()
+                val turn = Gemini.Turn("user", prompt, bmp)
+                Gemini.ask(prefs, "Kamu asisten ujian. Output hanya JSON array valid.", listOf(turn)) { r ->
+                    main.post {
+                        r.onSuccess { text ->
+                            try {
+                                val clean = text.trim().removePrefix("```json").removePrefix("```").removeSuffix("```").trim()
+                                val arr = org.json.JSONArray(clean)
+                                if (arr.length() == 0) {
+                                    Toast.makeText(this, "Tidak ada soal terdeteksi", Toast.LENGTH_SHORT).show()
+                                    return@onSuccess
+                                }
+                                overlayFillAnswers(arr)
+                            } catch (e: Exception) {
+                                Toast.makeText(this, "Gagal parse: ${e.message}", Toast.LENGTH_SHORT).show()
+                            }
+                        }.onFailure { e ->
+                            Toast.makeText(this, "Gagal AI: ${e.message}", Toast.LENGTH_SHORT).show()
+                        }
+                    }
+                }
+            }
+        }, 200)
+    }
+
+    private fun overlayFillAnswers(arr: org.json.JSONArray) {
+        // auto-fill all detected (overlay: no checkbox UI in service easily)
+        Toast.makeText(this, "Mengisi ${arr.length()} soal...", Toast.LENGTH_SHORT).show()
+        var i = 0
+        var done = 0
+        fun next() {
+            if (i >= arr.length()) {
+                Toast.makeText(this, "Selesai mengisi $done soal", Toast.LENGTH_SHORT).show()
+                return
+            }
+            val o = arr.getJSONObject(i)
+            val num = o.optInt("num", i + 1)
+            val type = o.optString("type", "ganda")
+            val answer = o.optString("answer", "").trim()
+            i++
+            if (answer.isEmpty()) {
+                main.postDelayed({ next() }, 200)
+                return
+            }
+            Toast.makeText(this, "Soal $num...", Toast.LENGTH_SHORT).show()
+            main.postDelayed({
+                var ok = false
+                if (type == "esai") {
+                    // try scroll to find field then type
+                    ZeroAccess.scroll()
+                    ok = ZeroAccess.type(answer)
+                } else {
+                    // try click letter or option text
+                    val letter = answer.take(1).uppercase()
+                    val candidates = listOf(
+                        answer,
+                        "$letter.",
+                        "$letter)",
+                        letter,
+                        o.optJSONArray("options")?.let { opts ->
+                            (0 until opts.length()).map { opts.optString(it) }
+                                .firstOrNull { it.startsWith(letter, true) }
+                        } ?: ""
+                    ).filter { it.isNotBlank() }.distinct()
+                    for (c in candidates) {
+                        if (ZeroAccess.click(c)) {
+                            ok = true
+                            break
+                        }
+                    }
+                }
+                if (ok) done++
+                main.postDelayed({ next() }, 800)
+            }, 400)
+        }
+        next()
     }
 
     private fun beginCapture(area: Boolean, kind: Int) {

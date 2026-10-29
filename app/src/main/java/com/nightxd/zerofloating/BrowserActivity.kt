@@ -6,6 +6,7 @@ import android.content.Intent
 import android.content.res.Configuration
 import android.graphics.Bitmap
 import android.graphics.Rect
+import android.graphics.RectF
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
@@ -409,6 +410,10 @@ class BrowserActivity : Activity() {
                 Entry(if (prefs.auto) "Auto terjemah: nyala" else "Auto terjemah: mati") { toggleAuto() },
                 Entry("Tanya Zero") { showChat().focusInput() },
                 Entry("Foto lalu tanya") { showChat().quickPick("camera") },
+                Entry("Crop lalu tanya") { captureThenAsk(true) },
+                Entry("Tanya layar penuh") { captureThenAsk(false) },
+                Entry("Crop lalu terjemah") { captureThenTranslate(true) },
+                Entry("Terjemah layar penuh") { captureThenTranslate(false) },
                 Entry("Model dan cara kerja") { showSettings(SettingsPanel.MODEL or SettingsPanel.MODE) },
                 Entry("Tampilan bubble") { showSettings(SettingsPanel.BUBBLE) },
                 Entry(if (prefs.quiet) "Mode senyap: nyala" else "Mode senyap: mati") { toggleQuiet() },
@@ -422,6 +427,10 @@ class BrowserActivity : Activity() {
             Entry(if (prefs.auto) "Auto terjemah: nyala" else "Auto terjemah: mati") { toggleAuto() },
             Entry("Tanya Zero") { showChat().focusInput() },
             Entry("Foto lalu tanya") { showChat().quickPick("camera") },
+            Entry("Crop lalu tanya") { captureThenAsk(true) },
+            Entry("Tanya layar penuh") { captureThenAsk(false) },
+            Entry("Crop lalu terjemah") { captureThenTranslate(true) },
+            Entry("Terjemah layar penuh") { captureThenTranslate(false) },
             Entry("Model dan cara kerja") { showSettings(SettingsPanel.MODEL or SettingsPanel.MODE) },
             Entry("Tampilan bubble") { showSettings(SettingsPanel.BUBBLE) },
             Entry(if (prefs.quiet) "Mode senyap: nyala" else "Mode senyap: mati") { toggleQuiet() },
@@ -597,6 +606,96 @@ class BrowserActivity : Activity() {
                 cb(null)
             }
         }, 90)
+    }
+
+    private fun captureThenAsk(crop: Boolean) {
+        hideMenu()
+        if (!crop) {
+            captureWeb { bmp ->
+                if (bmp == null) {
+                    toast("Gagal tangkap layar")
+                    return@captureWeb
+                }
+                showChat().ask("Jelaskan dan jawab isi gambar ini. Jika ada soal, berikan jawabannya.", bmp, "Tanya layar")
+            }
+            return
+        }
+        // crop mode: overlay selection on host
+        val sv = SelectionView(this) { r: RectF? ->
+            host.removeView(sv)
+            if (r == null) return@SelectionView
+            captureWeb { bmp ->
+                if (bmp == null) {
+                    toast("Gagal tangkap layar")
+                    return@captureWeb
+                }
+                val rect = Rect(
+                    (r.left * bmp.width).toInt().coerceIn(0, bmp.width - 1),
+                    (r.top * bmp.height).toInt().coerceIn(0, bmp.height - 1),
+                    (r.right * bmp.width).toInt().coerceIn(1, bmp.width),
+                    (r.bottom * bmp.height).toInt().coerceIn(1, bmp.height)
+                )
+                if (rect.width() < 8 || rect.height() < 8) {
+                    toast("Area terlalu kecil")
+                    return@captureWeb
+                }
+                val cropped = try { Bitmap.createBitmap(bmp, rect.left, rect.top, rect.width(), rect.height()) } catch (_: Exception) { null }
+                if (cropped == null) {
+                    toast("Gagal crop")
+                    return@captureWeb
+                }
+                showChat().ask("Jelaskan dan jawab isi gambar ini. Jika ada soal, berikan jawabannya.", cropped, "Crop lalu tanya")
+            }
+        }
+        host.addView(sv, FrameLayout.LayoutParams(MATCH, MATCH))
+    }
+
+    private fun captureThenTranslate(crop: Boolean) {
+        hideMenu()
+        val lang = prefs.lang
+        fun doTr(bmp: Bitmap) {
+            toast("Menerjemahkan gambar...")
+            val turn = Gemini.Turn("user", "Terjemahkan semua teks pada gambar ini ke bahasa $lang. Hanya keluarkan hasil terjemahan, tanpa penjelasan.")
+            turn.image = bmp
+            Gemini.ask(prefs, "Kamu penerjemah akurat.", listOf(turn)) { r ->
+                main.post {
+                    r.onSuccess { text ->
+                        showChat().ask("Hasil terjemahan gambar:\n\n$text", null, "Terjemah gambar")
+                    }.onFailure { e ->
+                        toast("Gagal: ${e.message}")
+                    }
+                }
+            }
+        }
+        if (!crop) {
+            captureWeb { bmp ->
+                if (bmp == null) toast("Gagal tangkap layar") else doTr(bmp)
+            }
+            return
+        }
+        val sv = SelectionView(this) { r: RectF? ->
+            host.removeView(sv)
+            if (r == null) return@SelectionView
+            captureWeb { bmp ->
+                if (bmp == null) {
+                    toast("Gagal tangkap layar")
+                    return@captureWeb
+                }
+                val rect = Rect(
+                    (r.left * bmp.width).toInt().coerceIn(0, bmp.width - 1),
+                    (r.top * bmp.height).toInt().coerceIn(0, bmp.height - 1),
+                    (r.right * bmp.width).toInt().coerceIn(1, bmp.width),
+                    (r.bottom * bmp.height).toInt().coerceIn(1, bmp.height)
+                )
+                if (rect.width() < 8 || rect.height() < 8) {
+                    toast("Area terlalu kecil")
+                    return@captureWeb
+                }
+                val cropped = try { Bitmap.createBitmap(bmp, rect.left, rect.top, rect.width(), rect.height()) } catch (_: Exception) { null }
+                if (cropped == null) toast("Gagal crop") else doTr(cropped)
+            }
+        }
+        host.addView(sv, FrameLayout.LayoutParams(MATCH, MATCH))
     }
 
     private fun toggleQuiet() {
@@ -963,18 +1062,27 @@ class BrowserActivity : Activity() {
         if (toFill.isEmpty()) return
         toast("AI sedang menjawab ${toFill.size} soal...")
         val sb = StringBuilder()
-        sb.append("Jawab soal berikut. Balas HANYA JSON array tanpa markdown, format:\n")
-        sb.append("[{\"num\":1,\"type\":\"ganda\",\"answer\":\"teks opsi yang dipilih atau huruf\"},{\"num\":2,\"type\":\"esai\",\"answer\":\"jawaban esai\"}]\n\n")
+        sb.append("Jawab soal berikut. Balas HANYA JSON array valid tanpa markdown.\n")
+        sb.append("Format: [{\"num\":1,\"type\":\"ganda\",\"answer\":\"...\"},{\"num\":2,\"type\":\"esai\",\"answer\":\"...\"}]\n")
+        sb.append("Aturan answer:\n")
+        sb.append("- Pilihan ganda BERHURUF (A/B/C/D): isi huruf saja, contoh \"A\" atau \"C\".\n")
+        sb.append("- Pilihan ganda TANPA huruf (teks opsi langsung): isi TEKS OPSI PERSIS seperti di daftar, contoh \"1.875 buah\".\n")
+        sb.append("- Esai: isi jawaban teks lengkap yang akan diketik ke kotak isian.\n\n")
         for (q in toFill) {
             sb.append("Soal ${q.num} (${q.type}): ${q.text}\n")
             if (q.options.isNotEmpty()) {
-                sb.append("Opsi: ${q.options.joinToString(" | ")}\n")
+                sb.append("Opsi:\n")
+                for (op in q.options) sb.append("  - ").append(op).append("\n")
             }
             if (q.hasImage) sb.append("(soal ini punya gambar)\n")
             sb.append("\n")
         }
         val turn = Gemini.Turn("user", sb.toString())
-        Gemini.ask(prefs, "Kamu asisten yang mengisi form. Jawab akurat, singkat untuk pilihan ganda, lengkap untuk esai. Hanya output JSON array valid.", listOf(turn)) { result ->
+        Gemini.ask(
+            prefs,
+            "Kamu asisten ujian akurat. Untuk ganda berhuruf jawab huruf; untuk ganda berteks jawab teks opsi persis; untuk esai jawab teks lengkap. Hanya output JSON array.",
+            listOf(turn)
+        ) { result ->
             result.onSuccess { text ->
                 main.post {
                     try {
@@ -1021,10 +1129,26 @@ class BrowserActivity : Activity() {
   var qNum = ${q.num};
   var qHint = '$qText'.toLowerCase();
   var ans = '$escaped';
-  var ansLow = ans.toLowerCase().replace(/^\s*[a-d][\.\)]\s*/i,'').trim();
+  function norm(s){
+    return (s||'').toLowerCase()
+      .replace(/[^\w\u00C0-\u024F\u1E00-\u1EFF.%°√π+\-/=()\s]/gi,' ')
+      .replace(/\s+/g,' ').trim();
+  }
+  function normNum(s){
+    // "1.875 buah" / "1,875" → comparable
+    return norm(s).replace(/\./g,'').replace(/,/g,'');
+  }
+  var ansNorm = norm(ans);
+  var ansNum = normNum(ans);
+  // letter only if answer is essentially A/B/C/D (not "1.500 buah")
   var letter = '';
-  var m = ans.match(/^([a-d])[\.\)]?\s*/i);
-  if(m) letter = m[1].toUpperCase();
+  if(/^[a-d]$/i.test(ans.trim()) || /^[a-d][\.\)]\s*$/i.test(ans.trim())){
+    letter = ans.trim().charAt(0).toUpperCase();
+  } else if(/^[a-d][\.\)]\s+\S/i.test(ans.trim())){
+    letter = ans.trim().charAt(0).toUpperCase();
+    ansNorm = norm(ans.replace(/^[a-d][\.\)]\s*/i,''));
+    ansNum = normNum(ansNorm);
+  }
   var opts = [$optsJson];
   var typ = '${q.type}';
 
@@ -1041,16 +1165,30 @@ class BrowserActivity : Activity() {
     }catch(e){}
     return true;
   }
+  function matchText(t){
+    if(!t) return false;
+    var tn = norm(t);
+    var tnum = normNum(t);
+    if(ansNorm && (tn===ansNorm || tn.indexOf(ansNorm)>=0 || ansNorm.indexOf(tn)>=0)) return true;
+    if(ansNum && ansNum.length>=3 && (tnum===ansNum || tnum.indexOf(ansNum)>=0 || ansNum.indexOf(tnum)>=0)) return true;
+    for(var o=0;o<opts.length;o++){
+      var op = norm(opts[o]);
+      var opn = normNum(opts[o]);
+      if(op && (tn===op || tn.indexOf(op)>=0 || op.indexOf(tn)>=0)) return true;
+      if(opn && opn.length>=3 && (tnum===opn || tnum.indexOf(opn)>=0)) return true;
+    }
+    return false;
+  }
 
-  // find container that looks like this question (by number or text)
   function findBlock(){
     var items = document.querySelectorAll('[role="listitem"],[data-item-id],.freebirdFormviewerViewItemsItemItem,.Qr7Oae,.geS5n,div[jsname]');
     var best = null;
     for(var i=0;i<items.length;i++){
       var t = (items[i].innerText||'').toLowerCase().replace(/\s+/g,' ');
       if(!t) continue;
-      if(t.indexOf(qNum+'.')===0 || t.indexOf(qNum+')')===0 || t.indexOf(qNum+'. ')>=0){
-        if(t.length < 800) return items[i];
+      // match "21." at start of a line inside block
+      if(new RegExp('(^|\\\\n)\\\\s*'+qNum+'[\\\\.\\\\)]\\\\s').test(t) || t.indexOf(qNum+'. ')>=0 || t.indexOf(qNum+') ')>=0){
+        if(t.length < 1200) return items[i];
         if(!best) best = items[i];
       }
       if(qHint.length>8 && t.indexOf(qHint.substring(0,Math.min(24,qHint.length)))>=0){
@@ -1067,58 +1205,50 @@ class BrowserActivity : Activity() {
   var root = block || document.body;
 
   if(typ === 'ganda' || typ === 'checkbox'){
-    // only search inside this question block
     var radios = root.querySelectorAll('input[type="radio"],input[type="checkbox"],[role="radio"],[role="checkbox"]');
-    if(radios.length===0 && block) radios = block.querySelectorAll('label,div[role="listitem"] span,div[role="listitem"] div');
-    // match by letter index within THIS block only
+    // 1) letter index only when answer is A-D style
     if(letter && radios.length>0){
       var idx = letter.charCodeAt(0)-65;
       if(idx>=0 && idx<radios.length) return clickEl(radios[idx]);
     }
+    // 2) match by option text on radio/label
     for(var i=0;i<radios.length;i++){
       var el = radios[i];
       var lab = el.closest('label') || el.parentElement || el;
-      var t = ((lab.innerText||lab.textContent||el.getAttribute('aria-label')||'')+'').toLowerCase().replace(/\s+/g,' ').trim();
-      if(t.length<1) continue;
-      if(letter && (t.indexOf(letter.toLowerCase()+'.')===0 || t.indexOf(letter.toLowerCase()+')')===0 || t===letter.toLowerCase())){
-        return clickEl(el);
-      }
-      if(ansLow && (t.indexOf(ansLow)>=0 || ansLow.indexOf(t.substring(0,Math.min(15,t.length)))>=0)){
-        return clickEl(el);
-      }
-      for(var o=0;o<opts.length;o++){
-        var op = (opts[o]||'').toLowerCase();
-        if(op && t.indexOf(op)>=0) return clickEl(el);
-      }
+      var t = ((lab.innerText||lab.textContent||el.getAttribute('aria-label')||'')+'');
+      if(matchText(t)) return clickEl(el);
+      if(letter && norm(t)===letter.toLowerCase()) return clickEl(el);
     }
-    // last resort: labels inside block matching A/B/C/D text
-    var labs = root.querySelectorAll('label,span,div');
+    // 3) clickable labels/spans with option text
+    var labs = root.querySelectorAll('label,span,div,li');
     for(var i=0;i<labs.length;i++){
-      var t = ((labs[i].innerText||'')+'').toLowerCase().replace(/\s+/g,' ').trim();
-      if(t.length<1||t.length>100) continue;
-      if(letter && (t.indexOf(letter.toLowerCase()+'.')===0 || t.indexOf(letter.toLowerCase()+')')===0)){
-        return clickEl(labs[i]);
-      }
-      if(ansLow && t.indexOf(ansLow)>=0) return clickEl(labs[i]);
+      var t = ((labs[i].innerText||'')+'');
+      if(t.length<1||t.length>120) continue;
+      if(matchText(t)) return clickEl(labs[i]);
     }
     return false;
   }
 
-  // essay / text
+  // essay: isi teks ke kotak di blok soal ini
   var fields = root.querySelectorAll('textarea,input[type="text"],input:not([type]),div[contenteditable="true"],div[role="textbox"]');
-  if(fields.length===0) fields = document.querySelectorAll('textarea,input[type="text"]');
+  if(fields.length===0 && block) fields = block.querySelectorAll('textarea,input,div[contenteditable="true"]');
   for(var i=0;i<fields.length;i++){
     var el = fields[i];
-    // prefer empty field near this question
-    if(el.tagName==='TEXTAREA' || el.tagName==='INPUT' || el.isContentEditable){
-      try{ el.scrollIntoView({behavior:'smooth',block:'center'}); }catch(e){}
-      el.focus();
-      if(el.isContentEditable){ el.innerText = ans; }
-      else { el.value = ans; }
-      el.dispatchEvent(new Event('input',{bubbles:true}));
-      el.dispatchEvent(new Event('change',{bubbles:true}));
-      return true;
+    if(!(el.tagName==='TEXTAREA' || el.tagName==='INPUT' || el.isContentEditable)) continue;
+    try{ el.scrollIntoView({behavior:'smooth',block:'center'}); }catch(e){}
+    el.focus();
+    if(el.isContentEditable){
+      el.innerText = ans;
+    } else {
+      var setter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement&&window.HTMLTextAreaElement.prototype||{},'value')
+        || Object.getOwnPropertyDescriptor(window.HTMLInputElement&&window.HTMLInputElement.prototype||{},'value');
+      if(setter && setter.set) setter.set.call(el, ans);
+      else el.value = ans;
     }
+    el.dispatchEvent(new Event('input',{bubbles:true}));
+    el.dispatchEvent(new Event('change',{bubbles:true}));
+    el.dispatchEvent(new KeyboardEvent('keyup',{bubbles:true}));
+    return true;
   }
   return false;
 })();
