@@ -250,7 +250,7 @@ class ChatPanel(
         val msg = addZero()
         Gemini.stream(
             prefs,
-            Zero.system(prefs.lang, prefs.level),
+            Zero.chat(prefs),
             ArrayList(turns),
             { part ->
                 if (!msg.started) {

@@ -24,6 +24,7 @@ class ChatActivity : Activity() {
         super.onCreate(savedInstanceState)
         prefs = Prefs(this)
         setContentView(buildUi())
+        Quiet.window(this, prefs.quiet)
     }
 
     private fun barButton(label: String, click: () -> Unit): TextView {
@@ -45,6 +46,13 @@ class ChatActivity : Activity() {
         bar.setPadding(dp(10), dp(6), dp(10), dp(6))
         bar.addView(tv("Zero", 20f, Pal.text, Fonts.black), LinearLayout.LayoutParams(0, WRAP, 1f))
         bar.addView(barButton("Model") { showSettings() }, lp(WRAP, WRAP, 0, 0, 8, 0))
+        val quiet = barButton(if (prefs.quiet) "Senyap: nyala" else "Senyap: mati") { }
+        quiet.setOnClickListener {
+            prefs.quiet = !prefs.quiet
+            Quiet.window(this, prefs.quiet)
+            quiet.text = if (prefs.quiet) "Senyap: nyala" else "Senyap: mati"
+        }
+        bar.addView(quiet, lp(WRAP, WRAP, 0, 0, 8, 0))
         bar.addView(barButton(Mode.short(prefs.mode)) { pickMode() })
         root.addView(bar, LinearLayout.LayoutParams(MATCH, WRAP))
         root.addView(rule(3), LinearLayout.LayoutParams(MATCH, dp(3)))

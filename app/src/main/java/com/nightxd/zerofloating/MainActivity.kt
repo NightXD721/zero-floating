@@ -33,12 +33,14 @@ class MainActivity : Activity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         prefs = Prefs(this)
+        Quiet.window(this, prefs.quiet)
         step = if (prefs.setupDone && prefs.apiKey.isNotBlank()) STEP_HOME else STEP_KEY
         render()
     }
 
     override fun onResume() {
         super.onResume()
+        Quiet.window(this, prefs.quiet)
         if (step == STEP_OVERLAY || step == STEP_HOME) render()
     }
 
@@ -493,6 +495,12 @@ class MainActivity : Activity() {
         content.add(button("API key dan model", false) { edit(STEP_KEY) }.also { lpTop(it) })
         content.add(button("Ubah alamat web", false) { edit(STEP_URL) }.also { lpTop(it) })
         content.add(button("Izin overlay", false) { edit(STEP_OVERLAY) }.also { lpTop(it) })
+        content.add(button("Mode senyap: " + (if (prefs.quiet) "nyala" else "mati"), false) {
+            prefs.quiet = !prefs.quiet
+            Quiet.window(this, prefs.quiet)
+            Quiet.sync(this)
+            render()
+        }.also { lpTop(it) })
 
         val footer = ArrayList<View>()
         footer.add(button("Mulai Zero", true) { Launch.go(this, prefs) })

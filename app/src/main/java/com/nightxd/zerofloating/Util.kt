@@ -15,6 +15,23 @@ import android.widget.Toast
 import java.io.ByteArrayOutputStream
 import kotlin.math.max
 
+object Quiet {
+    fun window(a: Activity, on: Boolean) {
+        if (on) {
+            a.window.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
+        } else {
+            a.window.clearFlags(WindowManager.LayoutParams.FLAG_SECURE)
+        }
+    }
+
+    fun sync(a: Context) {
+        if (!FloatingService.running) return
+        val i = Intent(a, FloatingService::class.java)
+        i.action = FloatingService.ACTION_QUIET
+        a.startService(i)
+    }
+}
+
 object Screen {
     fun real(ctx: Context): IntArray {
         val wm = ctx.getSystemService(Context.WINDOW_SERVICE) as WindowManager

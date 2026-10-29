@@ -116,6 +116,10 @@ class Prefs(context: Context) {
         get() = sp.getBoolean("auto", false)
         set(v) { sp.edit().putBoolean("auto", v).apply() }
 
+    var quiet: Boolean
+        get() = sp.getBoolean("quiet", false)
+        set(v) { sp.edit().putBoolean("quiet", v).apply() }
+
     var think: Boolean
         get() = sp.getBoolean("think", false)
         set(v) { sp.edit().putBoolean("think", v).apply() }

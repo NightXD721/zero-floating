@@ -5,6 +5,7 @@ import android.app.AlertDialog
 import android.content.Intent
 import android.content.res.Configuration
 import android.graphics.Bitmap
+import android.graphics.Canvas
 import android.graphics.Rect
 import android.os.Bundle
 import android.os.Handler
@@ -59,6 +60,7 @@ class BrowserActivity : Activity() {
             return
         }
         setContentView(buildUi())
+        Quiet.window(this, prefs.quiet)
         web.loadUrl(prefs.url)
     }
 
@@ -257,6 +259,7 @@ class BrowserActivity : Activity() {
             Entry("Foto lalu tanya") { showChat().quickPick("camera") },
             Entry("Model dan cara kerja") { showSettings(SettingsPanel.MODEL or SettingsPanel.MODE) },
             Entry("Tampilan bubble") { showSettings(SettingsPanel.BUBBLE) },
+            Entry(if (prefs.quiet) "Mode senyap: nyala" else "Mode senyap: mati") { toggleQuiet() },
             Entry("Ganti mode") { pickMode() }
         )
     }
@@ -344,7 +347,36 @@ class BrowserActivity : Activity() {
         dock.visibility = View.GONE
     }
 
+    private fun captureDraw(cb: (Bitmap?) -> Unit) {
+        val w = web.width
+        val h = web.height
+        if (w <= 0 || h <= 0) {
+            cb(null)
+            return
+        }
+        hideMenu()
+        val bmp = try {
+            Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
+        } catch (e: Exception) {
+            null
+        }
+        if (bmp == null) {
+            cb(null)
+            return
+        }
+        try {
+            web.draw(Canvas(bmp))
+            cb(bmp)
+        } catch (e: Exception) {
+            cb(null)
+        }
+    }
+
     private fun captureWeb(cb: (Bitmap?) -> Unit) {
+        if (prefs.quiet) {
+            captureDraw(cb)
+            return
+        }
         val w = host.width
         val h = host.height
         if (w <= 0 || h <= 0) {
@@ -376,6 +408,12 @@ class BrowserActivity : Activity() {
                 cb(null)
             }
         }, 90)
+    }
+
+    private fun toggleQuiet() {
+        prefs.quiet = !prefs.quiet
+        Quiet.window(this, prefs.quiet)
+        Quiet.sync(this)
     }
 
     private fun showBusy(busy: Boolean) {
