@@ -68,6 +68,15 @@ var n=Z.n[a[k]];
 if(n)n.__z=0;
 }
 };
+Z.rs=function(a){
+for(var k=0;k<a.length;k++){
+var id=a[k];
+var n=Z.n[id];
+if(!n)continue;
+if(Z.t[id]&&n.parentNode){n.nodeValue=Z.o[id];Z.t[id]=0;}
+n.__z=0;
+}
+};
 Z.ri=function(){
 var a=document.images;
 for(var i=0;i<a.length;i++)a[i].__zr=null;

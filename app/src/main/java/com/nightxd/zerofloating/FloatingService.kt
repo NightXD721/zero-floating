@@ -50,7 +50,7 @@ class FloatingService : Service() {
     private var settingsLp: WindowManager.LayoutParams? = null
     private val dimJob = Runnable {
         val full = prefs.bubbleOpacity / 100f
-        bubble?.alpha = if (prefs.bubbleDim) minOf(full, 0.35f) else full
+        bubble?.alpha = if (prefs.quiet) 0f else if (prefs.bubbleDim) minOf(full, 0.35f) else full
     }
     private var panelOn = false
     private var cardOn = false
@@ -70,8 +70,8 @@ class FloatingService : Service() {
             shutdown()
             return START_NOT_STICKY
         }
-        if (intent?.action == ACTION_QUIET) {
-            applyQuiet()
+        if (intent?.action == ACTION_QUIET || intent?.action == ACTION_SHOW) {
+            wake()
             return START_NOT_STICKY
         }
 
@@ -135,11 +135,18 @@ class FloatingService : Service() {
         val action = Notification.Action.Builder(
             Icon.createWithResource(this, R.drawable.ic_stat_zero), "Matikan", stop
         ).build()
+        val showIntent = Intent(this, FloatingService::class.java)
+        showIntent.action = ACTION_SHOW
+        val show = PendingIntent.getService(this, 2, showIntent, flags)
+        val showAction = Notification.Action.Builder(
+            Icon.createWithResource(this, R.drawable.ic_stat_zero), "Munculkan bubble", show
+        ).build()
         return Notification.Builder(this, CHANNEL)
             .setSmallIcon(R.drawable.ic_stat_zero)
             .setContentTitle("Zero Floating aktif")
             .setContentText("Menu mengambang siap dipakai")
             .setContentIntent(open)
+            .addAction(showAction)
             .addAction(action)
             .setOngoing(true)
             .build()
@@ -149,7 +156,6 @@ class FloatingService : Service() {
         var f = WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN
         if (!focusable) f = f or WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
         if (watchOutside) f = f or WindowManager.LayoutParams.FLAG_WATCH_OUTSIDE_TOUCH
-        if (prefs.quiet) f = f or WindowManager.LayoutParams.FLAG_SECURE
         val p = WindowManager.LayoutParams(
             w, h, WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY, f, PixelFormat.TRANSLUCENT
         )
@@ -260,32 +266,7 @@ class FloatingService : Service() {
 
     private fun toggleQuiet() {
         prefs.quiet = !prefs.quiet
-        applyQuiet()
-    }
-
-    private fun secure(v: View?, lp: WindowManager.LayoutParams?) {
-        if (v == null || lp == null) return
-        lp.flags = if (prefs.quiet) {
-            lp.flags or WindowManager.LayoutParams.FLAG_SECURE
-        } else {
-            lp.flags and WindowManager.LayoutParams.FLAG_SECURE.inv()
-        }
-        upd(v, lp)
-    }
-
-    private fun openForGrab() {
-        val v = bubble
-        val lp = bubbleLp
-        if (v == null || lp == null) return
-        lp.flags = lp.flags and WindowManager.LayoutParams.FLAG_SECURE.inv()
-        upd(v, lp)
-    }
-
-    private fun applyQuiet() {
-        secure(bubble, bubbleLp)
-        if (panelOn) secure(chat, panelLp)
-        if (cardOn) secure(card, cardLp)
-        if (settingsOn) secure(settings, settingsLp)
+        wake()
     }
 
     private fun toggleMenu() {
@@ -481,7 +462,7 @@ class FloatingService : Service() {
         main.removeCallbacks(dimJob)
         val full = prefs.bubbleOpacity / 100f
         bubble?.alpha = full
-        if (prefs.bubbleDim) main.postDelayed(dimJob, 2500)
+        if (prefs.bubbleDim || prefs.quiet) main.postDelayed(dimJob, 2500)
     }
 
     private fun applyBubble() {
@@ -631,7 +612,7 @@ class FloatingService : Service() {
             }
         }
         val p = params(WindowManager.LayoutParams.MATCH_PARENT, WindowManager.LayoutParams.MATCH_PARENT, false)
-        p.flags = (p.flags or WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS) and WindowManager.LayoutParams.FLAG_SECURE.inv()
+        p.flags = p.flags or WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS
         if (Build.VERSION.SDK_INT >= 28) {
             p.layoutInDisplayCutoutMode = WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES
         }
@@ -650,9 +631,7 @@ class FloatingService : Service() {
             return
         }
         bubble?.visibility = View.INVISIBLE
-        openForGrab()
         g.grab { bmp ->
-            applyQuiet()
             bubble?.visibility = View.VISIBLE
             if (bmp == null) {
                 Toast.makeText(this, "Gagal menangkap layar. Coba lagi.", Toast.LENGTH_LONG).show()
@@ -713,6 +692,7 @@ class FloatingService : Service() {
     companion object {
         const val ACTION_STOP = "com.nightxd.zerofloating.STOP"
         const val ACTION_QUIET = "com.nightxd.zerofloating.QUIET"
+        const val ACTION_SHOW = "com.nightxd.zerofloating.SHOW"
         const val EXTRA_CODE = "code"
         const val EXTRA_DATA = "data"
         private const val CHANNEL = "zero_floating"

@@ -37,6 +37,11 @@ class TransLayer(ctx: Context, private val web: View) : View(ctx) {
         invalidate()
     }
 
+    fun add(list: List<Patch>) {
+        items.addAll(list)
+        invalidate()
+    }
+
     fun put(list: List<Patch>, area: RectF) {
         val it = items.iterator()
         while (it.hasNext()) {

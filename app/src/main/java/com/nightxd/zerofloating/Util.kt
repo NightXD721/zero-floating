@@ -16,14 +16,6 @@ import java.io.ByteArrayOutputStream
 import kotlin.math.max
 
 object Quiet {
-    fun window(a: Activity, on: Boolean) {
-        if (on) {
-            a.window.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
-        } else {
-            a.window.clearFlags(WindowManager.LayoutParams.FLAG_SECURE)
-        }
-    }
-
     fun sync(a: Context) {
         if (!FloatingService.running) return
         val i = Intent(a, FloatingService::class.java)
@@ -87,6 +79,17 @@ object Pix {
     }
 }
 
+fun normalize(raw: String): String? {
+    var u = raw.trim()
+    if (u.isEmpty()) return null
+    val hasScheme = u.startsWith("http:", true) || u.startsWith("https:", true)
+    if (!hasScheme) u = "https:" + "/".repeat(2) + u
+    val host = Uri.parse(u).host
+    if (host.isNullOrEmpty()) return null
+    if (!host.contains(".") && host != "localhost") return null
+    return u
+}
+
 object Launch {
     fun overlaySettings(a: Context): Intent {
         return Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:" + a.packageName))
@@ -106,6 +109,10 @@ object Launch {
                 return
             }
             a.startActivity(Intent(a, BrowserActivity::class.java))
+        } else if (p.mode == Mode.FILL) {
+            val i = Intent(a, BrowserActivity::class.java)
+            i.putExtra("fill_mode", true)
+            a.startActivity(i)
         } else {
             a.startActivity(Intent(a, ChatActivity::class.java))
         }

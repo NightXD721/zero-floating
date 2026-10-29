@@ -9,11 +9,14 @@ Zero Floating adalah asisten AI bernama Zero yang melayang di atas layar HP. Gun
 - Dua penyedia AI: Google AI Studio (Gemini) dan Groq, dengan pilihan model atau ID model sendiri.
 - Tutorial bikin API key gratis di dalam aplikasi.
 - Zero tahu dirinya adalah aplikasi ini, jadi bisa menjelaskan fitur, pengaturan, tutorial API key, dan solusi masalah umum lewat chat.
-- Tiga mode:
+- Empat mode:
   - Overlay: bubble melayang di atas aplikasi lain.
   - Baca manhwa dan novel: web dibuka di dalam aplikasi, teks dan gambar halaman langsung ditimpa dengan terjemahan.
+  - Isi Google Form dan Docs: buka Form/Docs, deteksi soal (ganda, esai, gambar), centang mana yang diisi, AI mengisi otomatis tanpa membuka chat. Alamat web dimasukkan setiap kali, tidak disimpan.
   - Biasa: obrolan layar penuh dengan Zero, tanpa membuka web.
-- Mode senyap: bubble, menu, panel, dan layar aplikasi disembunyikan dari screenshot dan rekam layar. Bagian yang disembunyikan bisa tampil hitam atau kosong, tergantung HP.
+- Mode senyap: bubble jadi transparan penuh saat diam sehingga tidak tampil di screenshot dan rekam layar, tanpa memblokir keduanya. Bubble tetap bisa disentuh di posisinya, dan tombol Munculkan bubble di notifikasi membantu menemukannya.
+- Menu bubble punya tombol X untuk menutup menu kalau bubble tidak sengaja tersentuh.
+- Hasil terjemah muncul bertahap saat jawaban AI masih berjalan, jadi teks pertama tampil lebih cepat.
 - Bubble melayang yang bisa digeser, dengan pengaturan transparansi, ukuran, tempel ke tepi, dan redup saat diam.
 - Tanya lewat foto kamera, atau lewat crop layar dan layar penuh di mode Overlay.
 - Terjemah langsung di tempat pada mode Baca: teks web dan teks di dalam gambar manhwa diganti ke bahasa pilihanmu, bisa dikembalikan ke asli kapan saja.

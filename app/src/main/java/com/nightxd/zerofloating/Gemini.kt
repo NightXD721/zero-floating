@@ -26,6 +26,7 @@ object Gemini {
     class Busy(msg: String) : IOException(msg)
 
     private val pool: ExecutorService = Executors.newCachedThreadPool()
+    private val cfgOk = java.util.concurrent.ConcurrentHashMap<String, Int>()
     private val main = Handler(Looper.getMainLooper())
 
     @Volatile
@@ -143,9 +144,14 @@ object Gemini {
         think: Boolean,
         level: String
     ): String {
-        for (cfg in thinkOptions(model, think, level, onThought != null)) {
+        val opts = thinkOptions(model, think, level, onThought != null)
+        val ck = model + "|" + think + "|" + level + "|" + (onThought != null)
+        val from = (cfgOk[ck] ?: 0).coerceIn(0, maxOf(0, opts.size - 1))
+        for (i in from until opts.size) {
             try {
-                return fetch(key, model, system, turns, cfg, onText, onThought)
+                val out = fetch(key, model, system, turns, opts[i], onText, onThought)
+                cfgOk[ck] = i
+                return out
             } catch (e: Busy) {
                 throw e
             } catch (e: IOException) {

@@ -33,14 +33,12 @@ class MainActivity : Activity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         prefs = Prefs(this)
-        Quiet.window(this, prefs.quiet)
         step = if (prefs.setupDone && prefs.apiKey.isNotBlank()) STEP_HOME else STEP_KEY
         render()
     }
 
     override fun onResume() {
         super.onResume()
-        Quiet.window(this, prefs.quiet)
         if (step == STEP_OVERLAY || step == STEP_HOME) render()
     }
 
@@ -394,7 +392,7 @@ class MainActivity : Activity() {
     }
 
     private fun stepMode() {
-        val ids = listOf(Mode.READER, Mode.OVERLAY, Mode.NORMAL)
+        val ids = listOf(Mode.READER, Mode.OVERLAY, Mode.FILL, Mode.NORMAL)
         var chosen = if (!prefs.setupDone || (prefs.url.isBlank() && prefs.mode == Mode.READER)) Mode.OVERLAY else prefs.mode
         val cards = ArrayList<LinearLayout>()
 
@@ -474,6 +472,9 @@ class MainActivity : Activity() {
         if (mode == Mode.READER) {
             info.addView(tv("Web: " + (if (prefs.url.isBlank()) "(belum diisi)" else prefs.url), 13f, Pal.dim, Fonts.mono))
         }
+        if (mode == Mode.FILL) {
+            info.addView(tv("Alamat dimasukkan setiap kali buka mode (tidak disimpan)", 13f, Pal.dim, Fonts.mono))
+        }
         info.addView(tv("Model: " + Models.nameOf(prefs.model), 13f, Pal.dim, Fonts.mono))
         info.addView(tv("Terjemah ke: " + prefs.lang, 13f, Pal.dim, Fonts.mono))
 
@@ -497,7 +498,6 @@ class MainActivity : Activity() {
         content.add(button("Izin overlay", false) { edit(STEP_OVERLAY) }.also { lpTop(it) })
         content.add(button("Mode senyap: " + (if (prefs.quiet) "nyala" else "mati"), false) {
             prefs.quiet = !prefs.quiet
-            Quiet.window(this, prefs.quiet)
             Quiet.sync(this)
             render()
         }.also { lpTop(it) })

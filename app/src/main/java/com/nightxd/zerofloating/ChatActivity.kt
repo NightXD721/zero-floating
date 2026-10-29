@@ -24,7 +24,6 @@ class ChatActivity : Activity() {
         super.onCreate(savedInstanceState)
         prefs = Prefs(this)
         setContentView(buildUi())
-        Quiet.window(this, prefs.quiet)
     }
 
     private fun barButton(label: String, click: () -> Unit): TextView {
@@ -46,13 +45,6 @@ class ChatActivity : Activity() {
         bar.setPadding(dp(10), dp(6), dp(10), dp(6))
         bar.addView(tv("Zero", 20f, Pal.text, Fonts.black), LinearLayout.LayoutParams(0, WRAP, 1f))
         bar.addView(barButton("Model") { showSettings() }, lp(WRAP, WRAP, 0, 0, 8, 0))
-        val quiet = barButton(if (prefs.quiet) "Senyap: nyala" else "Senyap: mati") { }
-        quiet.setOnClickListener {
-            prefs.quiet = !prefs.quiet
-            Quiet.window(this, prefs.quiet)
-            quiet.text = if (prefs.quiet) "Senyap: nyala" else "Senyap: mati"
-        }
-        bar.addView(quiet, lp(WRAP, WRAP, 0, 0, 8, 0))
         bar.addView(barButton(Mode.short(prefs.mode)) { pickMode() })
         root.addView(bar, LinearLayout.LayoutParams(MATCH, WRAP))
         root.addView(rule(3), LinearLayout.LayoutParams(MATCH, dp(3)))
@@ -86,7 +78,7 @@ class ChatActivity : Activity() {
     }
 
     private fun pickMode() {
-        val ids = arrayOf(Mode.READER, Mode.OVERLAY, Mode.NORMAL)
+        val ids = arrayOf(Mode.READER, Mode.OVERLAY, Mode.FILL, Mode.NORMAL)
         val names = Array(ids.size) { Mode.label(ids[it]) }
         AlertDialog.Builder(this, android.R.style.Theme_Material_Light_Dialog_Alert)
             .setTitle("Pilih mode")
@@ -108,8 +100,14 @@ class ChatActivity : Activity() {
         prefs.mode = m
         if (m == Mode.OVERLAY) {
             startActivity(Intent(this, CaptureRequestActivity::class.java))
-        } else {
+        } else if (m == Mode.FILL) {
+            val i = Intent(this, BrowserActivity::class.java)
+            i.putExtra("fill_mode", true)
+            startActivity(i)
+        } else if (m == Mode.READER) {
             startActivity(Intent(this, BrowserActivity::class.java))
+        } else {
+            return
         }
         finish()
     }

@@ -112,7 +112,9 @@ class PageTranslator(
         var size = 0
         for (k in 0 until arr.length()) {
             val len = arr.getJSONArray(k).getString(1).length
-            if (cur.isNotEmpty() && (size + len > BATCH_CHARS || cur.size >= BATCH_NODES)) {
+            val limChars = if (batches.isEmpty()) FIRST_CHARS else BATCH_CHARS
+            val limNodes = if (batches.isEmpty()) FIRST_NODES else BATCH_NODES
+            if (cur.isNotEmpty() && (size + len > limChars || cur.size >= limNodes)) {
                 batches.add(cur)
                 cur = ArrayList()
                 size = 0
@@ -121,6 +123,7 @@ class PageTranslator(
             size += len
         }
         if (cur.isNotEmpty()) batches.add(cur)
+        textBusy = false
         var left = batches.size
         var allOk = true
         for (b in batches) {
@@ -131,27 +134,49 @@ class PageTranslator(
                 ids.put(row.getInt(0))
                 src.put(row.getString(1))
             }
-            send(ep, lang, ids, src, 0) { ok ->
+            send(ep, lang, ids, src, 0, BooleanArray(ids.length())) { ok ->
                 if (ep == epoch) {
                     if (!ok) allOk = false
                     left--
-                    if (left == 0) {
-                        textBusy = false
-                        if (allOk && round < 2) text(round + 1)
-                    }
+                    if (left == 0 && allOk && round < 2) text(round + 1)
                 }
             }
         }
     }
 
-    private fun send(ep: Int, lang: String, ids: JSONArray, src: JSONArray, tries: Int, done: (Boolean) -> Unit) {
+    private fun send(
+        ep: Int,
+        lang: String,
+        ids: JSONArray,
+        src: JSONArray,
+        tries: Int,
+        got: BooleanArray,
+        done: (Boolean) -> Unit
+    ) {
         val turn = Gemini.Turn("user", Zero.translateBatch(lang, src.toString()))
         turn.json = true
         begin(ep)
-        Gemini.stream(prefs, Zero.translateSystem(lang), listOf(turn), { }, { r ->
+        Gemini.stream(prefs, Zero.translateSystem(lang), listOf(turn), { snap ->
+            if (ep == epoch) live(ids, src, snap, got)
+        }, { r ->
             end(ep)
-            if (ep == epoch) onBatch(ep, lang, ids, src, tries, r, done)
+            if (ep == epoch) onBatch(ep, lang, ids, src, tries, got, r, done)
         }, null, true, true)
+    }
+
+    private fun live(ids: JSONArray, src: JSONArray, snap: String, got: BooleanArray) {
+        val list = Partial.strings(snap)
+        val put = JSONArray()
+        val lim = min(list.size, ids.length())
+        for (k in 0 until lim) {
+            if (got[k]) continue
+            got[k] = true
+            val t = list[k].trim()
+            if (t.isNotEmpty() && t != src.optString(k, "")) {
+                put.put(JSONArray().put(ids.getInt(k)).put(t))
+            }
+        }
+        if (put.length() > 0) script("window.__zero.put(" + put.toString() + ")")
     }
 
     private fun onBatch(
@@ -160,6 +185,7 @@ class PageTranslator(
         ids: JSONArray,
         src: JSONArray,
         tries: Int,
+        got: BooleanArray,
         r: Result<String>,
         done: (Boolean) -> Unit
     ) {
@@ -168,6 +194,8 @@ class PageTranslator(
         if (res != null && res.length() == ids.length()) {
             val put = JSONArray()
             for (k in 0 until ids.length()) {
+                if (got[k]) continue
+                got[k] = true
                 val t = res.optString(k, "").trim()
                 if (t.isNotEmpty() && t != src.optString(k, "")) {
                     put.put(JSONArray().put(ids.getInt(k)).put(t))
@@ -178,10 +206,11 @@ class PageTranslator(
             return
         }
         if (out != null && tries < 1) {
-            send(ep, lang, ids, src, tries + 1, done)
+            java.util.Arrays.fill(got, false)
+            send(ep, lang, ids, src, tries + 1, got, done)
             return
         }
-        script("window.__zero.un(" + ids.toString() + ")")
+        script("window.__zero.rs(" + ids.toString() + ")")
         fail(r.exceptionOrNull()?.message ?: "Hasil terjemah tidak lengkap")
         done(false)
     }
@@ -240,14 +269,36 @@ class PageTranslator(
             val ct = (item.getDouble(2) * k).toInt().coerceIn(0, bmp.height - 2)
             val cr = ((item.getDouble(1) + item.getDouble(3)) * k).toInt().coerceIn(cl + 1, bmp.width)
             val cb = ((item.getDouble(2) + item.getDouble(4)) * k).toInt().coerceIn(ct + 1, bmp.height)
-            val crop = Pix.crop(bmp, Rect(cl, ct, cr, cb))
+            val area = Rect(cl, ct, cr, cb)
+            val crop = Pix.crop(bmp, area)
             val turn = Gemini.Turn("user", Zero.translateBoxes(lang), crop)
             turn.json = true
+            var shown = 0
+            var drawn = false
             begin(ep)
-            Gemini.stream(prefs, Zero.translateSystem(lang), listOf(turn), { }, { r ->
+            Gemini.stream(prefs, Zero.translateSystem(lang), listOf(turn), { snap ->
+                if (ep == epoch) {
+                    val objs = Partial.objects(snap)
+                    val lim = min(objs.size, MAX_BOXES)
+                    val fresh = ArrayList<Patch>()
+                    while (shown < lim) {
+                        val p = patchOf(objs[shown], bmp, area, sx, sy)
+                        if (p != null) fresh.add(p)
+                        shown++
+                    }
+                    if (fresh.isNotEmpty()) {
+                        if (drawn) {
+                            layer.add(fresh)
+                        } else {
+                            drawn = true
+                            layer.put(fresh, zoneOf(area, sx, sy))
+                        }
+                    }
+                }
+            }, { r ->
                 end(ep)
                 if (ep == epoch) {
-                    onBoxes(r, bmp, Rect(cl, ct, cr, cb), sx, sy, item)
+                    onBoxes(r, bmp, area, sx, sy, item, drawn)
                     left--
                     if (left == 0) imgBusy = false
                 }
@@ -255,44 +306,54 @@ class PageTranslator(
         }
     }
 
-    private fun onBoxes(r: Result<String>, bmp: Bitmap, area: Rect, sx: Int, sy: Int, item: JSONArray) {
-        val out = r.getOrNull()
-        val arr = if (out == null) null else parseArray(out)
-        if (arr == null) {
-            release(item)
-            fail(r.exceptionOrNull()?.message ?: "Hasil terjemah gambar tidak terbaca")
-            return
-        }
-        val cw = area.width()
-        val ch = area.height()
-        val patches = ArrayList<Patch>()
-        for (j in 0 until min(arr.length(), MAX_BOXES)) {
-            val o = arr.optJSONObject(j) ?: continue
-            val bx = o.optJSONArray("box_2d") ?: o.optJSONArray("box") ?: continue
-            if (bx.length() < 4) continue
-            val y0 = bx.optDouble(0, 0.0).coerceIn(0.0, 1000.0)
-            val x0 = bx.optDouble(1, 0.0).coerceIn(0.0, 1000.0)
-            val y1 = bx.optDouble(2, 0.0).coerceIn(0.0, 1000.0)
-            val x1 = bx.optDouble(3, 0.0).coerceIn(0.0, 1000.0)
-            if (y1 - y0 < 4.0 || x1 - x0 < 4.0) continue
-            val tx = o.optString("text", o.optString("translation", "")).trim()
-            if (tx.isEmpty()) continue
-            val l = area.left + (x0 / 1000.0 * cw).toInt()
-            val t = area.top + (y0 / 1000.0 * ch).toInt()
-            val rr = area.left + (x1 / 1000.0 * cw).toInt()
-            val b = area.top + (y1 / 1000.0 * ch).toInt()
-            val fill = background(bmp, l, t, rr, b)
-            val lum = Color.red(fill) * 0.299 + Color.green(fill) * 0.587 + Color.blue(fill) * 0.114
-            val ink = if (lum > 140) 0xFF111111.toInt() else 0xFFF5F5F5.toInt()
-            patches.add(Patch((l + sx).toFloat(), (t + sy).toFloat(), (rr + sx).toFloat(), (b + sy).toFloat(), tx, fill, ink))
-        }
-        val zone = RectF(
+    private fun zoneOf(area: Rect, sx: Int, sy: Int): RectF {
+        return RectF(
             (area.left + sx).toFloat(),
             (area.top + sy).toFloat(),
             (area.right + sx).toFloat(),
             (area.bottom + sy).toFloat()
         )
-        layer.put(patches, zone)
+    }
+
+    private fun patchOf(o: JSONObject, bmp: Bitmap, area: Rect, sx: Int, sy: Int): Patch? {
+        val bx = o.optJSONArray("box_2d") ?: o.optJSONArray("box") ?: return null
+        if (bx.length() < 4) return null
+        val y0 = bx.optDouble(0, 0.0).coerceIn(0.0, 1000.0)
+        val x0 = bx.optDouble(1, 0.0).coerceIn(0.0, 1000.0)
+        val y1 = bx.optDouble(2, 0.0).coerceIn(0.0, 1000.0)
+        val x1 = bx.optDouble(3, 0.0).coerceIn(0.0, 1000.0)
+        if (y1 - y0 < 4.0 || x1 - x0 < 4.0) return null
+        val tx = o.optString("text", o.optString("translation", "")).trim()
+        if (tx.isEmpty()) return null
+        val cw = area.width()
+        val ch = area.height()
+        val l = area.left + (x0 / 1000.0 * cw).toInt()
+        val t = area.top + (y0 / 1000.0 * ch).toInt()
+        val rr = area.left + (x1 / 1000.0 * cw).toInt()
+        val b = area.top + (y1 / 1000.0 * ch).toInt()
+        val fill = background(bmp, l, t, rr, b)
+        val lum = Color.red(fill) * 0.299 + Color.green(fill) * 0.587 + Color.blue(fill) * 0.114
+        val ink = if (lum > 140) 0xFF111111.toInt() else 0xFFF5F5F5.toInt()
+        return Patch((l + sx).toFloat(), (t + sy).toFloat(), (rr + sx).toFloat(), (b + sy).toFloat(), tx, fill, ink)
+    }
+
+    private fun onBoxes(r: Result<String>, bmp: Bitmap, area: Rect, sx: Int, sy: Int, item: JSONArray, drawn: Boolean) {
+        val out = r.getOrNull()
+        val arr = if (out == null) null else parseArray(out)
+        if (arr == null) {
+            if (!drawn) {
+                release(item)
+                fail(r.exceptionOrNull()?.message ?: "Hasil terjemah gambar tidak terbaca")
+            }
+            return
+        }
+        val patches = ArrayList<Patch>()
+        for (j in 0 until min(arr.length(), MAX_BOXES)) {
+            val o = arr.optJSONObject(j) ?: continue
+            val p = patchOf(o, bmp, area, sx, sy)
+            if (p != null) patches.add(p)
+        }
+        layer.put(patches, zoneOf(area, sx, sy))
     }
 
     private fun background(bmp: Bitmap, l: Int, t: Int, r: Int, b: Int): Int {
@@ -320,6 +381,8 @@ class PageTranslator(
 
     companion object {
         private const val TEXT_BUDGET = 8000
+        private const val FIRST_CHARS = 700
+        private const val FIRST_NODES = 14
         private const val BATCH_CHARS = 2200
         private const val BATCH_NODES = 45
         private const val MAX_BOXES = 40

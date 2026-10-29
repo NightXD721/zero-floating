@@ -6,22 +6,26 @@ object Mode {
     const val READER = "reader"
     const val OVERLAY = "overlay"
     const val NORMAL = "normal"
+    const val FILL = "fill"
 
     fun label(m: String): String = when (m) {
         READER -> "Baca manhwa dan novel"
         OVERLAY -> "Overlay luar aplikasi"
+        FILL -> "Isi Google Form dan Docs"
         else -> "Mode biasa"
     }
 
     fun short(m: String): String = when (m) {
         READER -> "Baca"
         OVERLAY -> "Overlay"
+        FILL -> "Isi Form"
         else -> "Biasa"
     }
 
     fun about(m: String): String = when (m) {
         READER -> "Web dibuka di dalam aplikasi. Teks dan gambar halaman langsung ditimpa dengan terjemahan bahasa pilihanmu."
         OVERLAY -> "Menu mengambang muncul di atas aplikasi lain. Crop bagian layar mana saja, Zero langsung menjawab."
+        FILL -> "Buka Form atau Docs. Zero deteksi soal ganda, esai, dan gambar. Kamu centang mana yang diisi, AI mengisi otomatis tanpa membuka chat."
         else -> "Obrolan layar penuh dengan Zero. Tanya apa saja atau kirim foto dan file, tanpa membuka web."
     }
 }

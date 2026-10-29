@@ -206,6 +206,16 @@ fun Context.menuColumn(items: List<Entry>, after: () -> Unit): LinearLayout {
     col.setPadding(dp(3), dp(3), dp(3), dp(3))
     skin(col, Pal.panel, 5)
     col.minimumWidth = dp(190)
+    val close = tv("X", 16f, Pal.text, Fonts.black)
+    close.gravity = Gravity.CENTER
+    close.minimumWidth = dp(52)
+    close.minimumHeight = dp(40)
+    pressable(close, 2f)
+    close.setOnClickListener { after() }
+    val closeLp = LinearLayout.LayoutParams(WRAP, WRAP)
+    closeLp.gravity = Gravity.END
+    col.addView(close, closeLp)
+    col.addView(rule(2), LinearLayout.LayoutParams(MATCH, dp(2)))
     for (i in items.indices) {
         val e = items[i]
         val row = tv(e.label, 15f, if (e.danger) Pal.danger else Pal.text, Fonts.head)
