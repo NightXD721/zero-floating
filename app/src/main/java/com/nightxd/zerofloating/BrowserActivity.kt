@@ -403,6 +403,10 @@ class BrowserActivity : Activity() {
         if (fillMode) {
             return listOf(
                 Entry("Deteksi soal") { detectQuestions() },
+                Entry("Terjemah halaman") { tr.run() },
+                Entry("Terjemah seluruh halaman") { tr.runFull() },
+                Entry("Tampilkan asli") { showOriginal() },
+                Entry(if (prefs.auto) "Auto terjemah: nyala" else "Auto terjemah: mati") { toggleAuto() },
                 Entry("Tanya Zero") { showChat().focusInput() },
                 Entry("Foto lalu tanya") { showChat().quickPick("camera") },
                 Entry("Model dan cara kerja") { showSettings(SettingsPanel.MODEL or SettingsPanel.MODE) },
@@ -677,7 +681,8 @@ class BrowserActivity : Activity() {
         val type: String,
         val options: List<String>,
         val hasImage: Boolean,
-        val selector: String
+        val selector: String,
+        val index: Int = 0
     )
 
     private fun detectQuestions() {
@@ -845,9 +850,19 @@ class BrowserActivity : Activity() {
                         val opts = ArrayList<String>()
                         val oa = o.optJSONArray("options")
                         if (oa != null) for (j in 0 until oa.length()) opts.add(oa.getString(j))
-                        val t = o.optString("type", "esai")
+                        var t = o.optString("type", "esai").lowercase()
+                        // normalize type from options
+                        if (opts.size >= 2 && (t == "esai" || t.isBlank())) t = "ganda"
+                        if (opts.isEmpty() && t == "ganda") t = "esai"
+                        if (t == "radio") t = "ganda"
                         val hasImg = o.optBoolean("hasImage", false)
-                        if (t == "ganda" || t == "checkbox") ganda++ else esai++
+                        when {
+                            t == "ganda" || t == "checkbox" -> ganda++
+                            else -> {
+                                t = "esai"
+                                esai++
+                            }
+                        }
                         if (hasImg) gambar++
                         list.add(FormQuestion(
                             o.optInt("id", i + 1),
@@ -856,7 +871,8 @@ class BrowserActivity : Activity() {
                             t,
                             opts,
                             hasImg,
-                            o.optString("selector", "")
+                            o.optString("selector", ""),
+                            i
                         ))
                     }
                     questions = list
@@ -880,14 +896,24 @@ class BrowserActivity : Activity() {
         col.orientation = LinearLayout.VERTICAL
         col.setPadding(dp(10), dp(8), dp(10), dp(8))
 
-        val summary = tv("Terdeteksi: $ganda ganda/checkbox, $esai esai, $gambar gambar (total ${questions.size})", 14f, Pal.text, Fonts.head)
-        summary.setPadding(0, 0, 0, dp(8))
+        val summary = tv("Terdeteksi: $ganda ganda, $esai esai, $gambar gambar (total ${questions.size})", 14f, Pal.text, Fonts.head)
+        summary.setPadding(0, 0, 0, dp(4))
         col.addView(summary)
 
-        val note = tv("Centang nomor yang mau diisi, lalu tekan Isi.", 13f, Pal.dim, Fonts.note)
+        val countTv = tv("Dicentang: 0  |  Dilewati: ${questions.size}", 13f, Pal.accent, Fonts.medium)
+        countTv.setPadding(0, 0, 0, dp(8))
+        col.addView(countTv)
+
+        fun refreshCount() {
+            val n = selected.size
+            countTv.text = "Dicentang: $n  |  Dilewati: ${questions.size - n}"
+        }
+
+        val note = tv("Centang nomor yang mau diisi. Yang tidak dicentang akan dilewati.", 13f, Pal.dim, Fonts.note)
         note.setPadding(0, 0, 0, dp(8))
         col.addView(note)
 
+        val typeLabel = mapOf("ganda" to "Ganda", "checkbox" to "Centang", "esai" to "Esai")
         for (q in questions) {
             val row = LinearLayout(this)
             row.orientation = LinearLayout.HORIZONTAL
@@ -899,10 +925,13 @@ class BrowserActivity : Activity() {
             cb.isChecked = false
             cb.setOnCheckedChangeListener { _, checked ->
                 if (checked) selected.add(q.num) else selected.remove(q.num)
+                refreshCount()
             }
             row.addView(cb)
 
-            val label = tv("${q.num}. [${q.type}] ${q.text.take(60)}${if (q.text.length > 60) "…" else ""}", 13f, Pal.text, Fonts.body)
+            val kind = typeLabel[q.type] ?: q.type
+            val img = if (q.hasImage) " +gambar" else ""
+            val label = tv("${q.num}. [$kind$img] ${q.text.take(55)}${if (q.text.length > 55) "…" else ""}", 13f, Pal.text, Fonts.body)
             label.setPadding(dp(6), 0, 0, 0)
             row.addView(label, LinearLayout.LayoutParams(0, WRAP, 1f))
             col.addView(row, lp(MATCH, WRAP, 0, 0, 0, 6))
@@ -923,7 +952,7 @@ class BrowserActivity : Activity() {
         col.addView(btnRow, lp(MATCH, WRAP, 0, 10, 0, 0))
 
         sc.addView(col)
-        dock.addView(sc, FrameLayout.LayoutParams(MATCH, dp(320)))
+        dock.addView(sc, FrameLayout.LayoutParams(MATCH, dp(360)))
         dock.visibility = View.VISIBLE
         dock.alpha = prefs.panelOpacity / 100f
     }
@@ -968,102 +997,137 @@ class BrowserActivity : Activity() {
     }
 
     private fun applyAnswers(qs: List<FormQuestion>, answers: Map<Int, String>) {
+        // only checked questions, already filtered; process one by one in order
+        val ordered = qs.sortedBy { it.num }
         var done = 0
         fun next(i: Int) {
-            if (i >= qs.size) {
-                toast("Selesai mengisi $done soal")
+            if (i >= ordered.size) {
+                toast("Selesai mengisi $done dari ${ordered.size} soal")
                 return
             }
-            val q = qs[i]
-            val ans = answers[q.num] ?: ""
+            val q = ordered[i]
+            val ans = answers[q.num]?.trim().orEmpty()
             if (ans.isBlank()) {
-                next(i + 1)
+                // skip empty answer, go to next checked
+                main.postDelayed({ next(i + 1) }, 200)
                 return
             }
-            toast("Mengisi soal ${q.num}...")
+            toast("Soal ${q.num}: mengisi...")
+            val qText = q.text.take(40).replace("\\", "\\\\").replace("'", "\\'").replace("\n", " ")
             val escaped = ans.replace("\\", "\\\\").replace("'", "\\'").replace("\n", "\\n").replace("\"", "\\\"")
-            val js = when (q.type) {
-                "ganda", "checkbox" -> """
+            val optsJson = q.options.joinToString(",") { "'${it.replace("'", "\\'").take(60)}'" }
+            val js = """
 (function(){
-  var ans = '$escaped'.toLowerCase().replace(/^\s*[a-d][\.\)]\s*/i,'').trim();
+  var qNum = ${q.num};
+  var qHint = '$qText'.toLowerCase();
+  var ans = '$escaped';
+  var ansLow = ans.toLowerCase().replace(/^\s*[a-d][\.\)]\s*/i,'').trim();
   var letter = '';
-  var m = '$escaped'.match(/^([a-d])[\.\)]?\s*/i);
-  if (m) letter = m[1].toUpperCase();
+  var m = ans.match(/^([a-d])[\.\)]?\s*/i);
+  if(m) letter = m[1].toUpperCase();
+  var opts = [$optsJson];
+  var typ = '${q.type}';
+
   function clickEl(el){
     if(!el) return false;
-    el.scrollIntoView({behavior:'smooth',block:'center'});
-    if(el.click) el.click();
-    if(el.checked !== undefined) el.checked = true;
-    el.dispatchEvent(new Event('change',{bubbles:true}));
-    el.dispatchEvent(new MouseEvent('click',{bubbles:true,cancelable:true,view:window}));
+    try{ el.scrollIntoView({behavior:'smooth',block:'center'}); }catch(e){}
+    try{
+      if(el.focus) el.focus();
+      if(el.click) el.click();
+      if(el.checked !== undefined){ el.checked = true; }
+      el.dispatchEvent(new Event('input',{bubbles:true}));
+      el.dispatchEvent(new Event('change',{bubbles:true}));
+      el.dispatchEvent(new MouseEvent('click',{bubbles:true,cancelable:true,view:window}));
+    }catch(e){}
     return true;
   }
-  // 1. native input by name/id
-  var name = '${q.selector}';
-  var els = name ? document.querySelectorAll('input[name="'+name+'"],input[id="'+name+'"]') : [];
-  if(els.length===0) els = document.querySelectorAll('input[type="radio"],input[type="checkbox"]');
-  for(var i=0;i<els.length;i++){
-    var el=els[i];
-    var lab=el.closest('label')||document.querySelector('label[for="'+el.id+'"]')||el.parentElement;
-    var t=(lab?(lab.innerText||lab.textContent): (el.value||'')).toLowerCase();
-    if(t.indexOf(ans)>=0 || ans.indexOf(t.substring(0,Math.min(20,t.length)))>=0 || (letter && t.indexOf(letter.toLowerCase()+'.')===0)){
-      return clickEl(el);
+
+  // find container that looks like this question (by number or text)
+  function findBlock(){
+    var items = document.querySelectorAll('[role="listitem"],[data-item-id],.freebirdFormviewerViewItemsItemItem,.Qr7Oae,.geS5n,div[jsname]');
+    var best = null;
+    for(var i=0;i<items.length;i++){
+      var t = (items[i].innerText||'').toLowerCase().replace(/\s+/g,' ');
+      if(!t) continue;
+      if(t.indexOf(qNum+'.')===0 || t.indexOf(qNum+')')===0 || t.indexOf(qNum+'. ')>=0){
+        if(t.length < 800) return items[i];
+        if(!best) best = items[i];
+      }
+      if(qHint.length>8 && t.indexOf(qHint.substring(0,Math.min(24,qHint.length)))>=0){
+        if(!best || t.length < (best.innerText||'').length) best = items[i];
+      }
     }
+    return best;
   }
-  // 2. ARIA role=radio / checkbox (Google Forms modern)
-  var aria = document.querySelectorAll('[role="radio"],[role="checkbox"]');
-  for(var i=0;i<aria.length;i++){
-    var el=aria[i];
-    var t=(el.getAttribute('aria-label')||el.innerText||el.textContent||'').toLowerCase();
-    var parentTxt=(el.closest('label')||el.parentElement||el).innerText||'';
-    parentTxt=parentTxt.toLowerCase();
-    if(t.indexOf(ans)>=0 || parentTxt.indexOf(ans)>=0 || (letter && (t.indexOf(letter.toLowerCase())===0 || parentTxt.indexOf(letter.toLowerCase()+'.')>=0 || parentTxt.indexOf(letter.toLowerCase()+')')>=0))){
-      return clickEl(el);
+
+  var block = findBlock();
+  if(block){
+    try{ block.scrollIntoView({behavior:'smooth',block:'center'}); }catch(e){}
+  }
+  var root = block || document.body;
+
+  if(typ === 'ganda' || typ === 'checkbox'){
+    // only search inside this question block
+    var radios = root.querySelectorAll('input[type="radio"],input[type="checkbox"],[role="radio"],[role="checkbox"]');
+    if(radios.length===0 && block) radios = block.querySelectorAll('label,div[role="listitem"] span,div[role="listitem"] div');
+    // match by letter index within THIS block only
+    if(letter && radios.length>0){
+      var idx = letter.charCodeAt(0)-65;
+      if(idx>=0 && idx<radios.length) return clickEl(radios[idx]);
     }
-  }
-  // 3. click any element whose visible text matches option (A. xxx)
-  var all = document.querySelectorAll('label,div,span,li');
-  for(var i=0;i<all.length;i++){
-    var el=all[i];
-    var t=(el.innerText||el.textContent||'').toLowerCase().replace(/\s+/g,' ').trim();
-    if(t.length<2||t.length>120) continue;
-    if(t===ans || t.indexOf(ans)===0 || (letter && (t===letter.toLowerCase() || t.indexOf(letter.toLowerCase()+'.')===0 || t.indexOf(letter.toLowerCase()+')')===0))){
-      return clickEl(el);
+    for(var i=0;i<radios.length;i++){
+      var el = radios[i];
+      var lab = el.closest('label') || el.parentElement || el;
+      var t = ((lab.innerText||lab.textContent||el.getAttribute('aria-label')||'')+'').toLowerCase().replace(/\s+/g,' ').trim();
+      if(t.length<1) continue;
+      if(letter && (t.indexOf(letter.toLowerCase()+'.')===0 || t.indexOf(letter.toLowerCase()+')')===0 || t===letter.toLowerCase())){
+        return clickEl(el);
+      }
+      if(ansLow && (t.indexOf(ansLow)>=0 || ansLow.indexOf(t.substring(0,Math.min(15,t.length)))>=0)){
+        return clickEl(el);
+      }
+      for(var o=0;o<opts.length;o++){
+        var op = (opts[o]||'').toLowerCase();
+        if(op && t.indexOf(op)>=0) return clickEl(el);
+      }
     }
+    // last resort: labels inside block matching A/B/C/D text
+    var labs = root.querySelectorAll('label,span,div');
+    for(var i=0;i<labs.length;i++){
+      var t = ((labs[i].innerText||'')+'').toLowerCase().replace(/\s+/g,' ').trim();
+      if(t.length<1||t.length>100) continue;
+      if(letter && (t.indexOf(letter.toLowerCase()+'.')===0 || t.indexOf(letter.toLowerCase()+')')===0)){
+        return clickEl(labs[i]);
+      }
+      if(ansLow && t.indexOf(ansLow)>=0) return clickEl(labs[i]);
+    }
+    return false;
   }
-  // 4. index fallback A=0 B=1 ...
-  var idx=-1;
-  if(letter) idx=letter.charCodeAt(0)-65;
-  else if(/^\d+$/.test(ans)) idx=parseInt(ans,10)-1;
-  if(idx>=0){
-    var group=document.querySelectorAll('[role="radio"],input[type="radio"]');
-    if(group[idx]) return clickEl(group[idx]);
+
+  // essay / text
+  var fields = root.querySelectorAll('textarea,input[type="text"],input:not([type]),div[contenteditable="true"],div[role="textbox"]');
+  if(fields.length===0) fields = document.querySelectorAll('textarea,input[type="text"]');
+  for(var i=0;i<fields.length;i++){
+    var el = fields[i];
+    // prefer empty field near this question
+    if(el.tagName==='TEXTAREA' || el.tagName==='INPUT' || el.isContentEditable){
+      try{ el.scrollIntoView({behavior:'smooth',block:'center'}); }catch(e){}
+      el.focus();
+      if(el.isContentEditable){ el.innerText = ans; }
+      else { el.value = ans; }
+      el.dispatchEvent(new Event('input',{bubbles:true}));
+      el.dispatchEvent(new Event('change',{bubbles:true}));
+      return true;
+    }
   }
   return false;
 })();
 """.trimIndent()
-                else -> """
-(function(){
-  var name = '${q.selector}';
-  var ans = '$escaped';
-  var el = name ? document.querySelector('textarea[name="'+name+'"],input[name="'+name+'"],textarea[id="'+name+'"],input[id="'+name+'"]') : null;
-  if(!el) el = document.querySelector('textarea,input[type="text"]');
-  if(el){
-    el.focus();
-    el.value = ans;
-    el.dispatchEvent(new Event('input',{bubbles:true}));
-    el.dispatchEvent(new Event('change',{bubbles:true}));
-    el.scrollIntoView({behavior:'smooth',block:'center'});
-    return true;
-  }
-  return false;
-})();
-""".trimIndent()
-            }
             web.evaluateJavascript(js) { ok ->
                 main.post {
                     if (ok == "true") done++
-                    main.postDelayed({ next(i + 1) }, 600)
+                    // wait for scroll + click to settle before next question
+                    main.postDelayed({ next(i + 1) }, 900)
                 }
             }
         }

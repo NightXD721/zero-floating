@@ -14,8 +14,8 @@ android {
         applicationId = "com.nightxd.zerofloating"
         minSdk = 26
         targetSdk = 34
-        versionCode = runNumber
-        versionName = "1.0.$runNumber"
+        versionCode = 120 + runNumber
+        versionName = "1.2.$runNumber"
     }
 
     signingConfigs {

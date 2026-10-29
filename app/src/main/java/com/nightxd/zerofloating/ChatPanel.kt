@@ -63,7 +63,7 @@ class ChatPanel(
     private var tts: TextToSpeech? = null
     private var ttsReady = false
     private val mainH = Handler(Looper.getMainLooper())
-    private lateinit var micBtn: TextView
+    private lateinit var micBtn: ImageView
 
     init {
         orientation = VERTICAL
@@ -111,9 +111,12 @@ class ChatPanel(
         plus.setPadding(ctx.dp(14), ctx.dp(8), ctx.dp(14), ctx.dp(8))
         row.addView(plus, ctx.lp(WRAP, WRAP, 0, 0, 6, 0))
 
-        micBtn = ctx.button("🎤", false) { toggleVoice() }
-        micBtn.setPadding(ctx.dp(12), ctx.dp(8), ctx.dp(12), ctx.dp(8))
-        row.addView(micBtn, ctx.lp(WRAP, WRAP, 0, 0, 6, 0))
+        micBtn = ImageView(ctx)
+        micBtn.setImageResource(R.drawable.ic_mic)
+        micBtn.setPadding(ctx.dp(10), ctx.dp(8), ctx.dp(10), ctx.dp(8))
+        ctx.skin(micBtn, Pal.panel, 3, true, 4f, 2)
+        micBtn.setOnClickListener { toggleVoice() }
+        row.addView(micBtn, ctx.lp(ctx.dp(44), ctx.dp(40), 0, 0, 6, 0))
 
         input.hint = "Tanya Zero"
         input.setHintTextColor(Pal.dim)
@@ -134,14 +137,23 @@ class ChatPanel(
         addView(row, LayoutParams(MATCH, WRAP))
         addView(gripRow, LayoutParams(MATCH, WRAP))
 
-        tts = TextToSpeech(ctx.applicationContext) { status ->
+        val appCtx = ctx.applicationContext
+        tts = TextToSpeech(appCtx) { status ->
             ttsReady = status == TextToSpeech.SUCCESS
             if (ttsReady) {
-                tts?.language = Locale("id", "ID")
-                if (tts?.isLanguageAvailable(Locale("id", "ID")) == TextToSpeech.LANG_MISSING_DATA ||
-                    tts?.isLanguageAvailable(Locale("id", "ID")) == TextToSpeech.LANG_NOT_SUPPORTED
-                ) {
-                    tts?.language = Locale.getDefault()
+                val engine = tts ?: return@TextToSpeech
+                val id = Locale("id", "ID")
+                val ok = engine.setLanguage(id)
+                if (ok == TextToSpeech.LANG_MISSING_DATA || ok == TextToSpeech.LANG_NOT_SUPPORTED) {
+                    engine.language = Locale.getDefault()
+                }
+                if (android.os.Build.VERSION.SDK_INT >= 21) {
+                    engine.setAudioAttributes(
+                        android.media.AudioAttributes.Builder()
+                            .setUsage(android.media.AudioAttributes.USAGE_ASSISTANCE_ACCESSIBILITY)
+                            .setContentType(android.media.AudioAttributes.CONTENT_TYPE_SPEECH)
+                            .build()
+                    )
                 }
             }
         }
@@ -312,7 +324,7 @@ class ChatPanel(
                     if (msg.head.visibility == View.VISIBLE) setOpen(msg, false)
                 }
                 msg.answer.setTextColor(Pal.text)
-                msg.answer.text = Md.render(part)
+                msg.answer.setText(Md.render(part), TextView.BufferType.SPANNABLE)
                 scrollDown()
             },
             { r ->
@@ -321,7 +333,7 @@ class ChatPanel(
                     turns.add(Gemini.Turn("model", ans))
                     msg.raw = ans
                     msg.answer.setTextColor(Pal.text)
-                    msg.answer.text = Md.render(ans + Gemini.note(prefs))
+                    msg.answer.setText(Md.render(ans + Gemini.note(prefs)), TextView.BufferType.SPANNABLE)
                 }
                 r.onFailure { e ->
                     if (turns.isNotEmpty() && turns.last().role == "user") {
@@ -355,12 +367,18 @@ class ChatPanel(
 
     private fun maxBubble(): Int = (context.resources.displayMetrics.widthPixels * 0.78f).toInt()
 
-    private fun actionBtn(label: String, click: () -> Unit): TextView {
+    private fun actionBtn(iconRes: Int, label: String, click: () -> Unit): LinearLayout {
+        val row = LinearLayout(context)
+        row.gravity = Gravity.CENTER_VERTICAL
+        row.setPadding(context.dp(6), context.dp(4), context.dp(8), context.dp(4))
+        context.pressable(row, 6f)
+        val iv = ImageView(context)
+        iv.setImageResource(iconRes)
+        row.addView(iv, context.lp(context.dp(16), context.dp(16), 0, 0, 4, 0))
         val t = context.tv(label, 12f, Pal.accent, Fonts.medium)
-        t.setPadding(context.dp(8), context.dp(4), context.dp(8), context.dp(4))
-        context.pressable(t, 6f)
-        t.setOnClickListener { click() }
-        return t
+        row.addView(t)
+        row.setOnClickListener { click() }
+        return row
     }
 
     private fun copyText(text: String) {
@@ -402,7 +420,7 @@ class ChatPanel(
         val actions = LinearLayout(context)
         actions.gravity = Gravity.END
         actions.setPadding(0, context.dp(4), 0, 0)
-        actions.addView(actionBtn("Salin") { copyText(text) })
+        actions.addView(actionBtn(R.drawable.ic_copy, "Salin") { copyText(text) })
         box.addView(actions, LayoutParams(MATCH, WRAP))
         val p = context.lp(WRAP, WRAP, 24, 6, 0, 2)
         p.gravity = Gravity.END
@@ -435,9 +453,9 @@ class ChatPanel(
         val actions = LinearLayout(context)
         actions.gravity = Gravity.START
         actions.setPadding(0, context.dp(6), 0, 0)
-        actions.addView(actionBtn("Salin") { copyText(m.raw.ifBlank { answer.text.toString() }) })
-        actions.addView(actionBtn("Ulangi") { regenerate(m) })
-        actions.addView(actionBtn("Baca") { speak(m.raw.ifBlank { answer.text.toString() }) })
+        actions.addView(actionBtn(R.drawable.ic_copy, "Salin") { copyText(m.raw.ifBlank { answer.text.toString() }) })
+        actions.addView(actionBtn(R.drawable.ic_refresh, "Ulangi") { regenerate(m) })
+        actions.addView(actionBtn(R.drawable.ic_volume, "Baca") { speak(m.raw.ifBlank { answer.text.toString() }) })
         box.addView(actions, LayoutParams(MATCH, WRAP))
 
         val p = context.lp(WRAP, WRAP, 0, 6, 24, 2)
@@ -492,7 +510,7 @@ class ChatPanel(
             val act = context as? android.app.Activity
             if (act != null) {
                 act.requestPermissions(arrayOf(Manifest.permission.RECORD_AUDIO), 71)
-                Toast.makeText(context, "Izinkan mikrofon, lalu tekan 🎤 lagi", Toast.LENGTH_LONG).show()
+                Toast.makeText(context, "Izinkan mikrofon, lalu tekan Mic lagi", Toast.LENGTH_LONG).show()
             } else {
                 Toast.makeText(context, "Izinkan mikrofon di pengaturan aplikasi dulu", Toast.LENGTH_LONG).show()
                 try {
@@ -518,7 +536,7 @@ class ChatPanel(
         sr.setRecognitionListener(object : RecognitionListener {
             override fun onReadyForSpeech(params: Bundle?) {
                 listening = true
-                (micBtn as? TextView)?.text = "⏹"
+                micBtn.setImageResource(R.drawable.ic_mic_on)
                 Toast.makeText(context, "Mendengarkan...", Toast.LENGTH_SHORT).show()
             }
             override fun onBeginningOfSpeech() {}
@@ -526,11 +544,11 @@ class ChatPanel(
             override fun onBufferReceived(buffer: ByteArray?) {}
             override fun onEndOfSpeech() {
                 listening = false
-                (micBtn as? TextView)?.text = "🎤"
+                micBtn.setImageResource(R.drawable.ic_mic)
             }
             override fun onError(error: Int) {
                 listening = false
-                (micBtn as? TextView)?.text = "🎤"
+                micBtn.setImageResource(R.drawable.ic_mic)
                 val msg = when (error) {
                     SpeechRecognizer.ERROR_NO_MATCH -> "Tidak tertangkap, coba lagi"
                     SpeechRecognizer.ERROR_SPEECH_TIMEOUT -> "Waktu habis, coba lagi"
@@ -541,7 +559,7 @@ class ChatPanel(
             }
             override fun onResults(results: Bundle?) {
                 listening = false
-                (micBtn as? TextView)?.text = "🎤"
+                micBtn.setImageResource(R.drawable.ic_mic)
                 val texts = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
                 val best = texts?.firstOrNull()?.trim().orEmpty()
                 if (best.isNotEmpty()) {
@@ -569,7 +587,7 @@ class ChatPanel(
 
     private fun stopVoice() {
         listening = false
-        (micBtn as? TextView)?.text = "🎤"
+        micBtn.setImageResource(R.drawable.ic_mic)
         try {
             speech?.stopListening()
             speech?.cancel()

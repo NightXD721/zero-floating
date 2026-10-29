@@ -57,37 +57,39 @@ class PageTranslator(
     /** Translate every text node on the page (not just near viewport). Multi-pass until empty. */
     fun runFull() {
         fullRound(0)
-        images()
     }
 
     private fun fullRound(round: Int) {
         if (fullBusy && round == 0) return
         fullBusy = true
         val ep = epoch
-        val budget = if (round == 0) FULL_BUDGET else FULL_BUDGET
-        web.evaluateJavascript(PageJs.INSTALL + "window.__zero.scanAll(" + budget + ")") { raw ->
+        web.evaluateJavascript(PageJs.INSTALL + "window.__zero.scanAll(" + FULL_BUDGET + ")") { raw ->
             if (ep != epoch) {
                 fullBusy = false
                 return@evaluateJavascript
             }
             val arr = try {
-                JSONArray(raw ?: "[]")
+                val s = raw?.trim()?.removeSurrounding("\"")?.replace("\\\"", "\"")?.replace("\\n", "\n") ?: "[]"
+                JSONArray(s)
             } catch (e: Exception) {
-                null
+                try { JSONArray(raw ?: "[]") } catch (_: Exception) { null }
             }
             if (arr == null || arr.length() == 0) {
                 fullBusy = false
-                if (round > 0) {
-                    act.runOnUiThread {
-                        Toast.makeText(act, "Terjemah seluruh halaman selesai", Toast.LENGTH_SHORT).show()
-                    }
+                act.runOnUiThread {
+                    Toast.makeText(
+                        act,
+                        if (round > 0) "Terjemah seluruh halaman selesai" else "Tidak ada teks untuk diterjemahkan",
+                        Toast.LENGTH_SHORT
+                    ).show()
                 }
+                // still try images once at the end
+                if (round > 0) images()
                 return@evaluateJavascript
             }
             act.runOnUiThread {
-                if (round == 0) Toast.makeText(act, "Menerjemahkan seluruh halaman...", Toast.LENGTH_SHORT).show()
+                Toast.makeText(act, "Menerjemahkan seluruh halaman (${round + 1})...", Toast.LENGTH_SHORT).show()
             }
-            // reuse batching from onScan path by temporarily calling similar logic
             onFullScan(ep, round, arr)
         }
     }
@@ -102,10 +104,8 @@ class PageTranslator(
         var cur = ArrayList<Int>()
         var size = 0
         for (k in 0 until arr.length()) {
-            val len = arr.getJSONArray(k).getString(1).length
-            val limChars = BATCH_CHARS
-            val limNodes = BATCH_NODES
-            if (cur.isNotEmpty() && (size + len > limChars || cur.size >= limNodes)) {
+            val len = try { arr.getJSONArray(k).getString(1).length } catch (_: Exception) { 0 }
+            if (cur.isNotEmpty() && (size + len > BATCH_CHARS || cur.size >= BATCH_NODES)) {
                 batches.add(cur)
                 cur = ArrayList()
                 size = 0
@@ -114,14 +114,29 @@ class PageTranslator(
             size += len
         }
         if (cur.isNotEmpty()) batches.add(cur)
-
-        var left = batches.size
-        if (left == 0) {
+        if (batches.isEmpty()) {
             fullBusy = false
             return
         }
-        var allOk = true
-        for (b in batches) {
+        // sequential batches to avoid rate-limit and race
+        fun runBatch(bi: Int, allOk: Boolean) {
+            if (ep != epoch) {
+                fullBusy = false
+                return
+            }
+            if (bi >= batches.size) {
+                if (allOk && round < FULL_MAX_ROUNDS) {
+                    fullRound(round + 1)
+                } else {
+                    fullBusy = false
+                    act.runOnUiThread {
+                        Toast.makeText(act, "Terjemah seluruh halaman selesai", Toast.LENGTH_SHORT).show()
+                    }
+                    images()
+                }
+                return
+            }
+            val b = batches[bi]
             val ids = JSONArray()
             val src = JSONArray()
             for (k in b) {
@@ -130,22 +145,10 @@ class PageTranslator(
                 src.put(row.getString(1))
             }
             send(ep, lang, ids, src, 0, BooleanArray(ids.length())) { ok ->
-                if (ep == epoch) {
-                    if (!ok) allOk = false
-                    left--
-                    if (left == 0) {
-                        if (allOk && round < FULL_MAX_ROUNDS) {
-                            fullRound(round + 1)
-                        } else {
-                            fullBusy = false
-                            act.runOnUiThread {
-                                Toast.makeText(act, "Terjemah seluruh halaman selesai", Toast.LENGTH_SHORT).show()
-                            }
-                        }
-                    }
-                }
+                runBatch(bi + 1, allOk && ok)
             }
         }
+        runBatch(0, true)
     }
 
     private fun script(body: String) {
