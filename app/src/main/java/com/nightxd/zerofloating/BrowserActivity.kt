@@ -621,8 +621,11 @@ class BrowserActivity : Activity() {
             return
         }
         // crop mode: overlay selection on host
-        val sv = SelectionView(this) { r: RectF? ->
-            host.removeView(sv)
+        var sv: SelectionView? = null
+        sv = SelectionView(this) { r: RectF? ->
+            val v = sv
+            if (v != null) host.removeView(v)
+            sv = null
             if (r == null) return@SelectionView
             captureWeb { bmp ->
                 if (bmp == null) {
@@ -673,8 +676,11 @@ class BrowserActivity : Activity() {
             }
             return
         }
-        val sv = SelectionView(this) { r: RectF? ->
-            host.removeView(sv)
+        var sv: SelectionView? = null
+        sv = SelectionView(this) { r: RectF? ->
+            val v = sv
+            if (v != null) host.removeView(v)
+            sv = null
             if (r == null) return@SelectionView
             captureWeb { bmp ->
                 if (bmp == null) {
