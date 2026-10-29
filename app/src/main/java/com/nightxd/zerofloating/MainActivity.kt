@@ -388,12 +388,12 @@ class MainActivity : Activity() {
             prefs.url = ""
             go(STEP_MODE)
         }
-        page(3, "Alamat web (opsional)", "Hanya untuk mode baca manhwa dan novel atau mode biasa. Mode overlay tidak butuh.", content, listOf(next, skipUrl))
+        page(3, "Alamat web (opsional)", "Hanya untuk mode baca manhwa dan novel. Mode overlay dan mode biasa tidak butuh.", content, listOf(next, skipUrl))
     }
 
     private fun stepMode() {
         val ids = listOf(Mode.READER, Mode.OVERLAY, Mode.NORMAL)
-        var chosen = if (prefs.url.isBlank() && prefs.mode != Mode.OVERLAY) Mode.OVERLAY else prefs.mode
+        var chosen = if (!prefs.setupDone || (prefs.url.isBlank() && prefs.mode == Mode.READER)) Mode.OVERLAY else prefs.mode
         val cards = ArrayList<LinearLayout>()
 
         fun paint() {
@@ -469,7 +469,9 @@ class MainActivity : Activity() {
             it.setLineSpacing(0f, 1.1f)
         })
         info.addView(tv("Penyedia: " + (if (prefs.provider == "groq") "Groq" else "Google AI Studio"), 13f, Pal.dim, Fonts.mono))
-        info.addView(tv("Web: " + (if (prefs.url.isBlank()) "(belum diisi)" else prefs.url), 13f, Pal.dim, Fonts.mono))
+        if (mode == Mode.READER) {
+            info.addView(tv("Web: " + (if (prefs.url.isBlank()) "(belum diisi)" else prefs.url), 13f, Pal.dim, Fonts.mono))
+        }
         info.addView(tv("Model: " + Models.nameOf(prefs.model), 13f, Pal.dim, Fonts.mono))
         info.addView(tv("Terjemah ke: " + prefs.lang, 13f, Pal.dim, Fonts.mono))
 

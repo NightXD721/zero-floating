@@ -34,11 +34,30 @@
             android:windowSoftInputMode="adjustResize" />
 
         <activity
+            android:name=".ChatActivity"
+            android:exported="false"
+            android:configChanges="orientation|screenSize|smallestScreenSize|screenLayout|keyboardHidden|keyboard"
+            android:windowSoftInputMode="adjustResize" />
+
+        <activity
             android:name=".CaptureRequestActivity"
             android:exported="false"
             android:excludeFromRecents="true"
             android:configChanges="orientation|screenSize|smallestScreenSize|screenLayout|keyboardHidden"
             android:theme="@style/Theme.Zero.Clear" />
+
+        <activity
+            android:name=".AttachActivity"
+            android:exported="false"
+            android:excludeFromRecents="true"
+            android:configChanges="orientation|screenSize|smallestScreenSize|screenLayout|keyboardHidden"
+            android:theme="@style/Theme.Zero.Clear" />
+
+        <provider
+            android:name=".CamProvider"
+            android:authorities="com.nightxd.zerofloating.cam"
+            android:exported="false"
+            android:grantUriPermissions="true" />
 
         <service
             android:name=".FloatingService"

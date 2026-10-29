@@ -83,12 +83,14 @@ object Launch {
                 return
             }
             a.startActivity(Intent(a, CaptureRequestActivity::class.java))
-        } else {
+        } else if (p.mode == Mode.READER) {
             if (p.url.isBlank()) {
-                Toast.makeText(a, "Alamat web masih kosong. Isi lewat Ubah alamat web, atau pakai mode Overlay.", Toast.LENGTH_LONG).show()
+                Toast.makeText(a, "Alamat web masih kosong. Isi lewat Ubah alamat web, atau pakai mode lain.", Toast.LENGTH_LONG).show()
                 return
             }
             a.startActivity(Intent(a, BrowserActivity::class.java))
+        } else {
+            a.startActivity(Intent(a, ChatActivity::class.java))
         }
     }
 }

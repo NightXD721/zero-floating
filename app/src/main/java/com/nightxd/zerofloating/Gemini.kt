@@ -2,6 +2,7 @@ package com.nightxd.zerofloating
 
 import android.graphics.Bitmap
 import android.net.Uri
+import android.util.Base64
 import android.os.Handler
 import android.os.Looper
 import org.json.JSONArray
@@ -15,7 +16,12 @@ import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
 
 object Gemini {
-    class Turn(val role: String, val text: String, var image: Bitmap? = null)
+    class Turn(val role: String, val text: String, var image: Bitmap? = null) {
+        var small = false
+        var json = false
+        var more: List<Bitmap> = emptyList()
+        var pdf: ByteArray? = null
+    }
 
     class Busy(msg: String) : IOException(msg)
 
@@ -24,6 +30,9 @@ object Gemini {
 
     @Volatile
     var lastModel = ""
+
+    @Volatile
+    var lastSwitched = false
 
     fun ask(prefs: Prefs, system: String, turns: List<Turn>, done: (Result<String>) -> Unit) {
         stream(prefs, system, turns, { }, done, null, true)
@@ -36,12 +45,14 @@ object Gemini {
         onText: (String) -> Unit,
         done: (Result<String>) -> Unit,
         onThought: ((String) -> Unit)? = null,
-        fast: Boolean = false
+        fast: Boolean = false,
+        translate: Boolean = false
     ) {
         val key = prefs.apiKey
         val groq = prefs.provider == "groq"
-        val vision = turns.any { it.image != null }
+        val vision = turns.any { it.image != null || it.more.isNotEmpty() }
         var first = prefs.model
+        if (translate && prefs.trMode == "fast") first = Models.quick(groq, first)
         if (groq && vision && !Models.isVision(first)) first = prefs.groqVisionModel
         val think = prefs.think && !fast
         val level = prefs.level
@@ -55,7 +66,7 @@ object Gemini {
 
     fun note(prefs: Prefs): String {
         val used = lastModel
-        if (used.isEmpty() || used == prefs.model) return ""
+        if (used.isEmpty() || !lastSwitched) return ""
         return "\n\nDijawab oleh " + Models.nameOf(used) + " (dialihkan otomatis)."
     }
 
@@ -87,6 +98,7 @@ object Gemini {
                     attempt(key, order[i], system, turns, onText, onThought, think, level)
                 }
                 lastModel = order[i]
+                lastSwitched = i >= 2
                 return out
             } catch (e: Busy) {
                 last = e.message ?: last
@@ -185,12 +197,24 @@ object Gemini {
         val contents = JSONArray()
         for (t in turns) {
             val parts = JSONArray()
-            val img = t.image
-            if (img != null) {
+            val pics = ArrayList<Bitmap>()
+            val lead = t.image
+            if (lead != null) pics.add(lead)
+            pics.addAll(t.more)
+            for (pic in pics) {
                 parts.put(
                     JSONObject().put(
                         "inlineData",
-                        JSONObject().put("mimeType", "image/jpeg").put("data", Pix.b64(img))
+                        JSONObject().put("mimeType", "image/jpeg").put("data", Pix.b64(pic, if (t.small) 1280 else 1600, if (t.small) 65 else 75))
+                    )
+                )
+            }
+            val doc = t.pdf
+            if (doc != null) {
+                parts.put(
+                    JSONObject().put(
+                        "inlineData",
+                        JSONObject().put("mimeType", "application/pdf").put("data", Base64.encodeToString(doc, Base64.NO_WRAP))
                     )
                 )
             }
@@ -198,9 +222,10 @@ object Gemini {
             contents.put(JSONObject().put("role", t.role).put("parts", parts))
         }
         body.put("contents", contents)
-        if (cfg != null) {
-            body.put("generationConfig", JSONObject().put("thinkingConfig", cfg))
-        }
+        val gen = JSONObject()
+        if (cfg != null) gen.put("thinkingConfig", cfg)
+        if (turns.any { it.json }) gen.put("responseMimeType", "application/json")
+        if (gen.length() > 0) body.put("generationConfig", gen)
 
         val target = Uri.Builder()
             .scheme("https")
@@ -368,16 +393,21 @@ object Gemini {
         msgs.put(JSONObject().put("role", "system").put("content", system))
         for (t in turns) {
             val role = if (t.role == "model") "assistant" else "user"
-            val img = t.image
-            if (img != null) {
+            val pics = ArrayList<Bitmap>()
+            val lead = t.image
+            if (lead != null) pics.add(lead)
+            pics.addAll(t.more)
+            if (pics.isNotEmpty()) {
                 val arr = JSONArray()
                 arr.put(JSONObject().put("type", "text").put("text", t.text))
-                arr.put(
-                    JSONObject().put("type", "image_url").put(
-                        "image_url",
-                        JSONObject().put("url", "data:image/jpeg;base64," + Pix.b64(img))
+                for (pic in pics.take(5)) {
+                    arr.put(
+                        JSONObject().put("type", "image_url").put(
+                            "image_url",
+                            JSONObject().put("url", "data:image/jpeg;base64," + Pix.b64(pic, if (t.small) 1280 else 1600, if (t.small) 65 else 75))
+                        )
                     )
-                )
+                }
                 msgs.put(JSONObject().put("role", role).put("content", arr))
             } else {
                 msgs.put(JSONObject().put("role", role).put("content", t.text))

@@ -44,6 +44,13 @@ object Tex {
         "lim" to "lim", "sin" to "sin", "cos" to "cos", "tan" to "tan", "cot" to "cot",
         "sec" to "sec", "csc" to "csc", "log" to "log", "ln" to "ln", "exp" to "exp",
         "max" to "max", "min" to "min", "gcd" to "gcd", "det" to "det", "mod" to "mod",
+        "hbar" to "\u0127", "ell" to "\u2113", "rightleftharpoons" to "\u21CC", "longrightarrow" to "\u27F6",
+        "uparrow" to "\u2191", "downarrow" to "\u2193", "lt" to "<", "gt" to ">", "ll" to "\u226A", "gg" to "\u226B",
+        "cong" to "\u2245", "setminus" to "\u2216", "oplus" to "\u2295", "otimes" to "\u2297", "vee" to "\u2228",
+        "wedge" to "\u2227", "neg" to "\u00AC", "lfloor" to "\u230A", "rfloor" to "\u230B", "lceil" to "\u2308",
+        "rceil" to "\u2309", "langle" to "\u27E8", "rangle" to "\u27E9", "prime" to "\u2032", "nsubseteq" to "\u2288",
+        "supset" to "\u2283", "supseteq" to "\u2287", "varnothing" to "\u2205", "Re" to "Re", "Im" to "Im",
+        "arcsin" to "arcsin", "arccos" to "arccos", "arctan" to "arctan", "sinh" to "sinh", "cosh" to "cosh", "tanh" to "tanh",
         "left" to "", "right" to "", "displaystyle" to "", "limits" to "", "quad" to "  ",
         "qquad" to "    ", "big" to "", "Big" to "", "bigg" to ""
     )
@@ -66,13 +73,17 @@ object Tex {
         return null
     }
 
+    private fun scriptChar(c: Char): Boolean {
+        return c in '\u2070'..'\u209F' || c == '\u00B2' || c == '\u00B3' || c == '\u00B9' || c == '\u02E3' || c == '\u1D62' || c == '\u1D63' || c == '\u1D64' || c == '\u1D65' || c == '\u2C7C'
+    }
+
     private fun wrap(x: String): String {
-        if (x.isNotEmpty() && x.all { it.isLetterOrDigit() || it == '.' }) return x
+        if (x.isNotEmpty() && x.all { it.isLetterOrDigit() || it == '.' || scriptChar(it) }) return x
         return "(" + x + ")"
     }
 
-    private val fracRe = Regex("""\\[dt]?frac(?![a-zA-Z])""")
-    private val wrapRe = Regex("""\\(text|mathrm|mathbf|mathit|textbf|textit|operatorname|mathbb|mathcal|boldsymbol|bm|mathsf|vec|hat|bar|overline|tilde)(?![a-zA-Z])""")
+    private val fracRe = Regex("""\\([dt]?frac|binom)(?![a-zA-Z])""")
+    private val wrapRe = Regex("""\\(text|mathrm|mathbf|mathit|textbf|textit|operatorname|mathbb|mathcal|boldsymbol|bm|mathsf|vec|hat|bar|overline|tilde|ce|underline|overrightarrow|overleftarrow|boxed|cancel|xcancel)(?![a-zA-Z])""")
     private val cmdRe = Regex("""\\([a-zA-Z]+)""")
 
     private fun fracs(s0: String): String {
@@ -83,7 +94,8 @@ object Tex {
             val b = group(s, a[2]) ?: break
             val num = conv(s.substring(a[0], a[1]), true)
             val den = conv(s.substring(b[0], b[1]), true)
-            s = s.substring(0, m.range.first) + wrap(num) + "/" + wrap(den) + s.substring(b[2])
+            val joined = if (m.groupValues[1] == "binom") "C(" + num + ", " + den + ")" else wrap(num) + "/" + wrap(den)
+            s = s.substring(0, m.range.first) + joined + s.substring(b[2])
         }
         return s
     }
@@ -119,15 +131,20 @@ object Tex {
         while (true) {
             val m = wrapRe.find(s) ?: break
             val g = group(s, m.range.last + 1) ?: break
-            val inner = conv(s.substring(g[0], g[1]), true)
-            val tail = when (m.groupValues[1]) {
-                "vec" -> "\u20D7"
+            val name = m.groupValues[1]
+            val raw = s.substring(g[0], g[1])
+            val inner = if (name == "ce") chem(raw) else conv(raw, true)
+            val tail = when (name) {
+                "vec", "overrightarrow" -> "\u20D7"
+                "overleftarrow" -> "\u20D6"
+                "boxed" -> "]"
                 "hat" -> "\u0302"
                 "bar", "overline" -> "\u0305"
                 "tilde" -> "\u0303"
                 else -> ""
             }
-            s = s.substring(0, m.range.first) + inner + tail + s.substring(g[2])
+            val head = if (name == "boxed") "[" else ""
+            s = s.substring(0, m.range.first) + head + inner + tail + s.substring(g[2])
         }
         return s
     }
@@ -181,8 +198,38 @@ object Tex {
         return out.toString()
     }
 
+    private fun chem(raw: String): String {
+        var s = raw.trim()
+        s = s.replace("<=>", "\u21CC").replace("<->", "\u2194").replace("->", "\u2192").replace("<-", "\u2190")
+        s = chargeRe.replace(s) { m -> script(true, m.groupValues[1]) }
+        s = indexRe.replace(s) { m -> m.groupValues[1] + script(false, m.groupValues[2]) }
+        return s.replace("{", "").replace("}", "")
+    }
+
+    private val chargeRe = Regex("""\^\{?([0-9]*[+-])\}?""")
+    private val indexRe = Regex("""([A-Za-z)\]])(\d+)""")
+    private val envRe = Regex("""\\begin\{([a-zA-Z*]+)\}([\s\S]*?)\\end\{\1\}""")
+
+    private fun envs(s: String): String {
+        return envRe.replace(s) { m ->
+            val name = m.groupValues[1].removeSuffix("*")
+            val rows = ArrayList<String>()
+            for (r in m.groupValues[2].trim().split("\\\\")) {
+                val t = conv(r.replace("&", "  "), true)
+                if (t.isNotEmpty()) rows.add(t)
+            }
+            when (name) {
+                "pmatrix" -> rows.joinToString("\n") { "( " + it + " )" }
+                "bmatrix" -> rows.joinToString("\n") { "[ " + it + " ]" }
+                "vmatrix" -> rows.joinToString("\n") { "| " + it + " |" }
+                "cases" -> rows.joinToString("\n") { "{ " + it }
+                else -> rows.joinToString("\n")
+            }
+        }
+    }
+
     private fun conv(s0: String, withScripts: Boolean): String {
-        var s = fracs(s0)
+        var s = fracs(envs(s0))
         s = roots(s)
         s = wrappers(s)
         s = commands(s)

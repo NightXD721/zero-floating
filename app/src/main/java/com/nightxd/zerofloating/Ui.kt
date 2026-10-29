@@ -47,6 +47,35 @@ object Fonts {
     val mono: Typeface = Typeface.create("monospace", Typeface.NORMAL)
 }
 
+class Grip(ctx: Context) : View(ctx) {
+    private val p = Paint(Paint.ANTI_ALIAS_FLAG)
+
+    init {
+        p.color = Pal.line
+        p.strokeWidth = ctx.dpf(2.5f)
+        p.strokeCap = Paint.Cap.ROUND
+    }
+
+    override fun onDraw(canvas: Canvas) {
+        val d = context.dpf(1f)
+        val w = width.toFloat()
+        val h = height.toFloat()
+        for (k in 1..3) {
+            canvas.drawLine(w - 5f * d * k - 3f * d, h - 3f * d, w - 3f * d, h - 5f * d * k - 3f * d, p)
+        }
+    }
+}
+
+class GripRow(ctx: Context) : LinearLayout(ctx) {
+    val grip = Grip(ctx)
+
+    init {
+        gravity = Gravity.END
+        visibility = View.GONE
+        addView(grip, LayoutParams(ctx.dp(34), ctx.dp(24)))
+    }
+}
+
 class Entry(val label: String, val danger: Boolean = false, val run: () -> Unit)
 
 class Brut(

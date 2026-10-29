@@ -19,6 +19,11 @@ object Models {
 
     fun list(provider: String): List<ModelInfo> = if (provider == "groq") groq else all
 
+    fun quick(groq: Boolean, current: String): String {
+        if (groq) return "llama-3.1-8b-instant"
+        return if (current.contains("lite")) current else "gemini-3.5-flash-lite"
+    }
+
     fun defaultFor(provider: String): String = if (provider == "groq") GROQ_DEFAULT else DEFAULT
 
     fun isVision(id: String): Boolean {

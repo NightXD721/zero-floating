@@ -28,7 +28,6 @@ import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.TextView
 import android.widget.Toast
-import org.json.JSONArray
 import kotlin.math.abs
 import kotlin.math.max
 
@@ -43,8 +42,8 @@ class BrowserActivity : Activity() {
     private lateinit var bubble: Mark
     private var menu: LinearLayout? = null
     private var chat: ChatPanel? = null
-    private var card: ResultCard? = null
-    private var selection: SelectionView? = null
+    private lateinit var layer: TransLayer
+    private lateinit var tr: PageTranslator
     private var autoJob: Runnable? = null
     private var lastAuto = 0L
     private var reader = false
@@ -105,9 +104,12 @@ class BrowserActivity : Activity() {
         root.addView(pw, LinearLayout.LayoutParams(MATCH, dp(4)))
 
         web = WebView(this)
+        layer = TransLayer(this, web)
+        tr = PageTranslator(this, prefs, web, layer, { cb -> captureWeb(cb) }, { busy -> showBusy(busy) })
         configureWeb()
         host = FrameLayout(this)
         host.addView(web, FrameLayout.LayoutParams(MATCH, MATCH))
+        host.addView(layer, FrameLayout.LayoutParams(MATCH, MATCH))
         bubble = Mark(this)
         host.addView(bubble, FrameLayout.LayoutParams(dp(prefs.bubbleSize), dp(prefs.bubbleSize)))
         bubble.alpha = prefs.bubbleOpacity / 100f
@@ -154,8 +156,17 @@ class BrowserActivity : Activity() {
                 return true
             }
 
+            override fun onPageStarted(view: WebView?, url: String?, favicon: Bitmap?) {
+                tr.reset()
+            }
+
             override fun onPageFinished(view: WebView?, url: String?) {
                 titleView.text = view?.title ?: url ?: ""
+                if (reader && prefs.auto) main.postDelayed({ tr.run() }, 700)
+            }
+
+            override fun onScaleChanged(view: WebView?, oldScale: Float, newScale: Float) {
+                tr.rescale()
             }
         }
 
@@ -173,7 +184,10 @@ class BrowserActivity : Activity() {
             false
         }
 
-        web.setOnScrollChangeListener { _, _, _, _, _ -> scheduleAuto() }
+        web.setOnScrollChangeListener { _, _, _, _, _ ->
+            layer.invalidate()
+            scheduleAuto()
+        }
     }
 
     private fun wireBubble() {
@@ -235,29 +249,16 @@ class BrowserActivity : Activity() {
     }
 
     private fun entries(): List<Entry> {
-        return if (reader) {
-            listOf(
-                Entry("Terjemah layar") { translateScreen() },
-                Entry("Terjemah teks halaman") { translatePageText() },
-                Entry(if (prefs.auto) "Auto terjemah: nyala" else "Auto terjemah: mati") { toggleAuto() },
-                Entry("Tanya Zero") { showChat().focusInput() },
-                Entry("Model dan cara kerja") { showSettings(SettingsPanel.MODEL or SettingsPanel.MODE) },
-                Entry("Tampilan bubble") { showSettings(SettingsPanel.BUBBLE) },
-                Entry("Ganti mode") { pickMode() }
-            )
-        } else {
-            listOf(
-                Entry("Tanya Zero") { showChat().focusInput() },
-                Entry("Crop lalu tanya") { startCrop(K_ASK) },
-                Entry("Ringkas halaman") { summarizePage() },
-                Entry("Terjemah layar") { translateScreen() },
-                Entry("Crop lalu terjemah") { startCrop(K_TR) },
-                Entry("Terjemah teks halaman") { translatePageText() },
-                Entry("Model dan cara kerja") { showSettings(SettingsPanel.MODEL or SettingsPanel.MODE) },
-                Entry("Tampilan bubble") { showSettings(SettingsPanel.BUBBLE) },
-                Entry("Ganti mode") { pickMode() }
-            )
-        }
+        return listOf(
+            Entry("Terjemah halaman") { tr.run() },
+            Entry("Tampilkan asli") { showOriginal() },
+            Entry(if (prefs.auto) "Auto terjemah: nyala" else "Auto terjemah: mati") { toggleAuto() },
+            Entry("Tanya Zero") { showChat().focusInput() },
+            Entry("Foto lalu tanya") { showChat().quickPick("camera") },
+            Entry("Model dan cara kerja") { showSettings(SettingsPanel.MODEL or SettingsPanel.MODE) },
+            Entry("Tampilan bubble") { showSettings(SettingsPanel.BUBBLE) },
+            Entry("Ganti mode") { pickMode() }
+        )
     }
 
     private fun showMenu() {
@@ -294,18 +295,8 @@ class BrowserActivity : Activity() {
         val c = chat ?: ChatPanel(this, prefs) { hideDock() }.also { chat = it }
         if (c.parent !== dock) {
             dock.removeAllViews()
-            val h = (resources.displayMetrics.heightPixels * 0.46f).toInt()
+            val h = (resources.displayMetrics.heightPixels * prefs.chatHeight / 100f).toInt()
             dock.addView(c, FrameLayout.LayoutParams(MATCH, h))
-            dock.visibility = View.VISIBLE
-        }
-        return c
-    }
-
-    private fun showCard(): ResultCard {
-        val c = card ?: ResultCard(this, reader) { hideDock() }.also { card = it }
-        if (c.parent !== dock) {
-            dock.removeAllViews()
-            dock.addView(c, FrameLayout.LayoutParams(MATCH, WRAP))
             dock.visibility = View.VISIBLE
         }
         return c
@@ -337,6 +328,12 @@ class BrowserActivity : Activity() {
         lpb.height = dp(prefs.bubbleSize)
         bubble.layoutParams = lpb
         dock.alpha = prefs.panelOpacity / 100f
+        val cc = chat
+        if (cc != null && cc.parent === dock) {
+            val lpc = cc.layoutParams
+            lpc.height = (resources.displayMetrics.heightPixels * prefs.chatHeight / 100f).toInt()
+            cc.layoutParams = lpc
+        }
         wake()
         host.post { clampBubble() }
     }
@@ -345,12 +342,6 @@ class BrowserActivity : Activity() {
         hideKeyboard()
         dock.removeAllViews()
         dock.visibility = View.GONE
-    }
-
-    private fun removeSelection() {
-        val s = selection
-        if (s != null) host.removeView(s)
-        selection = null
     }
 
     private fun captureWeb(cb: (Bitmap?) -> Unit) {
@@ -362,6 +353,7 @@ class BrowserActivity : Activity() {
         }
         hideMenu()
         bubble.visibility = View.INVISIBLE
+        layer.visibility = View.INVISIBLE
         host.postDelayed({
             val loc = IntArray(2)
             host.getLocationInWindow(loc)
@@ -373,84 +365,33 @@ class BrowserActivity : Activity() {
                     bmp,
                     { code ->
                         bubble.visibility = View.VISIBLE
+                        layer.visibility = View.VISIBLE
                         cb(if (code == PixelCopy.SUCCESS) bmp else null)
                     },
                     main
                 )
             } catch (e: Exception) {
                 bubble.visibility = View.VISIBLE
+                layer.visibility = View.VISIBLE
                 cb(null)
             }
-        }, 130)
+        }, 90)
     }
 
-    private fun deliver(kind: Int, img: Bitmap) {
-        if (kind == K_ASK) {
-            showChat().ask(Zero.askImage(), img, "Gambar dari halaman")
-        } else {
-            showCard().translateImage(prefs, img)
-        }
+    private fun showBusy(busy: Boolean) {
+        titleView.text = if (busy) "Zero menerjemahkan..." else (web.title ?: "")
     }
 
-    private fun startCrop(kind: Int) {
-        removeSelection()
-        val sv = SelectionView(this) { r ->
-            main.post { removeSelection() }
-            if (r != null) {
-                val rect = Rect(r.left.toInt(), r.top.toInt(), r.right.toInt(), r.bottom.toInt())
-                captureWeb { bmp ->
-                    if (bmp == null) {
-                        toast("Gagal menangkap halaman")
-                    } else {
-                        deliver(kind, Pix.crop(bmp, rect))
-                    }
-                }
-            }
-        }
-        selection = sv
-        host.addView(sv, FrameLayout.LayoutParams(MATCH, MATCH))
-    }
-
-    private fun translateScreen() {
-        captureWeb { bmp ->
-            if (bmp == null) toast("Gagal menangkap halaman") else showCard().translateImage(prefs, bmp)
-        }
-    }
-
-    private fun pageText(cb: (String) -> Unit) {
-        web.evaluateJavascript("(function(){var b=document.body;return b?b.innerText:''})()") { raw ->
-            val s = try {
-                JSONArray("[" + (raw ?: "null") + "]").optString(0, "")
-            } catch (e: Exception) {
-                ""
-            }
-            cb(if (s == "null") "" else s)
-        }
-    }
-
-    private fun translatePageText() {
-        pageText { t ->
-            if (t.trim().length < 20) {
-                toast("Teks halaman tidak ditemukan")
-            } else {
-                showCard().translateText(prefs, t.take(12000))
-            }
-        }
-    }
-
-    private fun summarizePage() {
-        pageText { t ->
-            if (t.isBlank()) {
-                toast("Teks halaman tidak ditemukan")
-            } else {
-                showChat().ask(Zero.summarize(t.take(14000)), null, "Ringkas halaman ini")
-            }
-        }
+    private fun showOriginal() {
+        prefs.auto = false
+        tr.restore()
+        toast("Halaman kembali ke asli. Auto terjemah mati.")
     }
 
     private fun toggleAuto() {
         prefs.auto = !prefs.auto
-        toast(if (prefs.auto) "Auto terjemah nyala. Berhenti scroll, Zero menerjemahkan." else "Auto terjemah mati")
+        toast(if (prefs.auto) "Auto terjemah nyala. Berhenti scroll, halaman langsung diterjemahkan." else "Auto terjemah mati")
+        if (prefs.auto) tr.run()
     }
 
     private fun scheduleAuto() {
@@ -459,21 +400,14 @@ class BrowserActivity : Activity() {
         if (old != null) main.removeCallbacks(old)
         val r = Runnable { runAuto() }
         autoJob = r
-        main.postDelayed(r, 1600)
+        main.postDelayed(r, 900)
     }
 
     private fun runAuto() {
         if (!prefs.auto) return
-        if (SystemClock.uptimeMillis() - lastAuto < 1500) return
-        val c = card
-        if (c != null && c.busy) {
-            scheduleAuto()
-            return
-        }
-        captureWeb { bmp ->
-            lastAuto = SystemClock.uptimeMillis()
-            if (bmp != null) showCard().translateImage(prefs, bmp)
-        }
+        if (SystemClock.uptimeMillis() - lastAuto < 700) return
+        lastAuto = SystemClock.uptimeMillis()
+        tr.run()
     }
 
     private fun pickMode() {
@@ -496,16 +430,15 @@ class BrowserActivity : Activity() {
         if (m == Mode.OVERLAY) {
             startActivity(Intent(this, CaptureRequestActivity::class.java))
             finish()
+        } else if (m == Mode.NORMAL) {
+            startActivity(Intent(this, ChatActivity::class.java))
+            finish()
         } else {
             recreate()
         }
     }
 
     override fun onBackPressed() {
-        if (selection != null) {
-            removeSelection()
-            return
-        }
         if (menu != null) {
             hideMenu()
             return
@@ -524,6 +457,7 @@ class BrowserActivity : Activity() {
     override fun onConfigurationChanged(newConfig: Configuration) {
         super.onConfigurationChanged(newConfig)
         hideMenu()
+        tr.rescale()
         host.post { clampBubble() }
     }
 
@@ -544,10 +478,5 @@ class BrowserActivity : Activity() {
             web.destroy()
         }
         super.onDestroy()
-    }
-
-    companion object {
-        private const val K_ASK = 0
-        private const val K_TR = 1
     }
 }

@@ -20,9 +20,9 @@ object Mode {
     }
 
     fun about(m: String): String = when (m) {
-        READER -> "Web dibuka di dalam aplikasi. Gambar halaman diterjemahkan otomatis ke bahasa pilihanmu."
+        READER -> "Web dibuka di dalam aplikasi. Teks dan gambar halaman langsung ditimpa dengan terjemahan bahasa pilihanmu."
         OVERLAY -> "Menu mengambang muncul di atas aplikasi lain. Crop bagian layar mana saja, Zero langsung menjawab."
-        else -> "Web dibuka di dalam aplikasi lengkap dengan menu Zero: tanya, crop, ringkas, dan terjemah."
+        else -> "Obrolan layar penuh dengan Zero. Tanya apa saja atau kirim foto dan file, tanpa membuka web."
     }
 }
 
@@ -63,6 +63,34 @@ class Prefs(context: Context) {
     var panelOpacity: Int
         get() = sp.getInt("panel_opacity", 100)
         set(v) { sp.edit().putInt("panel_opacity", v).apply() }
+
+    var trMode: String
+        get() = str("tr_mode", "fast")
+        set(v) { put("tr_mode", v) }
+
+    var panelWidth: Int
+        get() = sp.getInt("panel_width", 80)
+        set(v) { sp.edit().putInt("panel_width", v).apply() }
+
+    var chatHeight: Int
+        get() = sp.getInt("chat_height", 42)
+        set(v) { sp.edit().putInt("chat_height", v).apply() }
+
+    var cardHeight: Int
+        get() = sp.getInt("card_height", 26)
+        set(v) { sp.edit().putInt("card_height", v).apply() }
+
+    var panelPos: String
+        get() = str("panel_pos", "top")
+        set(v) { put("panel_pos", v) }
+
+    var cardPos: String
+        get() = str("card_pos", "bottom")
+        set(v) { put("card_pos", v) }
+
+    var fontSize: Int
+        get() = sp.getInt("font_size", 14)
+        set(v) { sp.edit().putInt("font_size", v).apply() }
 
     var bubbleDim: Boolean
         get() = sp.getBoolean("bubble_dim", true)

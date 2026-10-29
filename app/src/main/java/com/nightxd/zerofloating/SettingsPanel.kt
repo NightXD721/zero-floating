@@ -19,6 +19,7 @@ class SettingsPanel(
 ) : LinearLayout(ctx) {
 
     val handle = LinearLayout(ctx)
+    val gripRow = GripRow(ctx)
     private val modelBox = LinearLayout(ctx)
     private var live: List<ModelInfo>? = null
 
@@ -29,7 +30,7 @@ class SettingsPanel(
 
         handle.gravity = Gravity.CENTER_VERTICAL
         handle.setPadding(ctx.dp(14), ctx.dp(10), ctx.dp(8), ctx.dp(8))
-        val title = if ((parts and BUBBLE) != 0) "Tampilan bubble" else "Model dan cara kerja"
+        val title = if ((parts and BUBBLE) != 0) "Tampilan dan ukuran" else "Model dan cara kerja"
         handle.addView(ctx.tv(title, 19f, Pal.text, Fonts.black), LayoutParams(0, WRAP, 1f))
         val close = ctx.tv("Tutup", 13f, Pal.accent, Fonts.medium)
         close.setPadding(ctx.dp(10), ctx.dp(8), ctx.dp(10), ctx.dp(8))
@@ -54,6 +55,12 @@ class SettingsPanel(
         val sc = ScrollView(ctx)
         sc.addView(col, FrameLayout.LayoutParams(MATCH, WRAP))
         addView(sc, LayoutParams(MATCH, 0, 1f))
+        addView(gripRow, LayoutParams(MATCH, WRAP))
+    }
+
+    fun enableResize(): View {
+        gripRow.visibility = View.VISIBLE
+        return gripRow.grip
     }
 
     private fun label(text: String): TextView {
@@ -201,6 +208,14 @@ class SettingsPanel(
                 12f, Pal.dim, Fonts.note
             ).also { it.setPadding(0, context.dp(6), 0, 0) }
         )
+        col.addView(label("Terjemah"))
+        col.addView(toggle("Terjemah instan", { prefs.trMode == "fast" }, { prefs.trMode = if (it) "fast" else "best" }))
+        col.addView(
+            context.tv(
+                "Nyala: pakai model tercepat, berpikir dimatikan, gambar dikecilkan. Mati: pakai model pilihanmu, lebih teliti tapi lebih lambat.",
+                12f, Pal.dim, Fonts.note
+            ).also { it.setPadding(0, context.dp(6), 0, 0) }
+        )
     }
 
     private fun toggle(label: String, get: () -> Boolean, set: (Boolean) -> Unit): TextView {
@@ -244,10 +259,40 @@ class SettingsPanel(
         col.addView(sb, LayoutParams(MATCH, WRAP))
     }
 
+    private fun posRow(col: LinearLayout, title: String, get: () -> String, set: (String) -> Unit) {
+        col.addView(label(title))
+        val opts = listOf("top" to "Atas", "mid" to "Tengah", "bottom" to "Bawah")
+        val row = LinearLayout(context)
+        val chips = ArrayList<TextView>()
+        for (i in opts.indices) {
+            val c = chip(opts[i].second)
+            chips.add(c)
+            row.addView(c, context.lp(0, WRAP, 0, 0, if (i < 2) 8 else 0, 0).also { it.weight = 1f })
+        }
+        fun paint() {
+            for (i in chips.indices) paintChip(chips[i], opts[i].first == get())
+        }
+        for (i in chips.indices) {
+            chips[i].setOnClickListener {
+                set(opts[i].first)
+                paint()
+                onApply()
+            }
+        }
+        paint()
+        col.addView(row, LayoutParams(MATCH, WRAP))
+    }
+
     private fun bubbleSection(col: LinearLayout) {
         seek(col, { "Transparansi bubble: " + it + "%" }, 30, 100, prefs.bubbleOpacity) { prefs.bubbleOpacity = it }
         seek(col, { "Ukuran bubble: " + it + " dp" }, 40, 88, prefs.bubbleSize) { prefs.bubbleSize = it }
         seek(col, { "Transparansi panel dan kartu hasil: " + it + "%" }, 40, 100, prefs.panelOpacity) { prefs.panelOpacity = it }
+        seek(col, { "Lebar panel: " + it + "%" }, 40, 100, prefs.panelWidth) { prefs.panelWidth = it }
+        seek(col, { "Tinggi panel chat: " + it + "%" }, 25, 90, prefs.chatHeight) { prefs.chatHeight = it }
+        seek(col, { "Tinggi kartu terjemah: " + it + "%" }, 10, 60, prefs.cardHeight) { prefs.cardHeight = it }
+        seek(col, { "Ukuran teks: " + it + " sp" }, 12, 22, prefs.fontSize) { prefs.fontSize = it }
+        posRow(col, "Posisi panel chat", { prefs.panelPos }, { prefs.panelPos = it })
+        posRow(col, "Posisi kartu terjemah", { prefs.cardPos }, { prefs.cardPos = it })
         col.addView(toggle("Tempel ke tepi", { prefs.bubbleSnap }, { prefs.bubbleSnap = it }), context.lp(MATCH, WRAP, 0, 14, 0, 0))
         col.addView(toggle("Redup saat diam", { prefs.bubbleDim }, { prefs.bubbleDim = it }), context.lp(MATCH, WRAP, 0, 8, 0, 0))
     }

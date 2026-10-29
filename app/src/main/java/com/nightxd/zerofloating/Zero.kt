@@ -16,6 +16,8 @@ object Zero {
             "Gunakan teks biasa, boleh **tebal** dan daftar dengan tanda minus. Jangan pakai emoji. " +
             "Tulis rumus dengan teks biasa dan simbol Unicode, misalnya x^2 ditulis x\u00B2, pecahan ditulis a/b, akar ditulis \u221A(x). " +
             "Jangan pakai LaTeX dan jangan pakai tanda dolar untuk rumus. " +
+            "Rumus kimia ditulis dengan subskrip Unicode, misalnya H\u2082O dan CO\u2082, reaksi memakai tanda \u2192. " +
+            "Untuk tabel pakai tabel markdown dengan tanda garis tegak. " +
             "Bahasa terjemahan pilihan pengguna adalah " + lang + "."
     }
 
@@ -34,6 +36,26 @@ object Zero {
     fun translateText(lang: String, text: String): String {
         return "Terjemahkan teks berikut ke bahasa " + lang + ". " +
             "Pertahankan paragraf dan urutan, jaga gaya bahasa asli, dan jangan menambah komentar.\n\n" + text
+    }
+
+    fun translateSystem(lang: String): String {
+        return "Kamu adalah mesin penerjemah. Terjemahkan ke bahasa " + lang + " dengan akurat, alami, dan setia pada gaya aslinya. " +
+            "Balas hanya dalam format yang diminta, tanpa penjelasan, tanpa komentar, dan tanpa blok kode."
+    }
+
+    fun translateBatch(lang: String, json: String): String {
+        return "Terjemahkan setiap string pada JSON array berikut ke bahasa " + lang + ". " +
+            "Balas hanya JSON array berisi string hasil terjemahan dengan jumlah dan urutan yang sama persis. " +
+            "Jika sebuah string sudah berbahasa " + lang + ", atau hanya berisi nama, angka, atau simbol, kembalikan apa adanya.\n\n" + json
+    }
+
+    fun translateBoxes(lang: String): String {
+        return "Gambar ini adalah potongan halaman komik, manhwa, atau poster. " +
+            "Temukan semua teks yang tertulis di dalam gambar (dialog, narasi, judul, kata efek suara) lalu terjemahkan ke bahasa " + lang + ". " +
+            "Balas hanya JSON array. Setiap elemen berbentuk {\"box_2d\":[ymin,xmin,ymax,xmax],\"text\":\"terjemahan\"}. " +
+            "Koordinat memakai skala 0 sampai 1000 relatif terhadap tinggi dan lebar gambar. " +
+            "Satu elemen untuk satu balon atau satu blok teks, dan box harus menutup seluruh teks aslinya. " +
+            "Lewati teks yang sudah berbahasa " + lang + ". Kalau tidak ada teks, balas []."
     }
 
     fun summarize(text: String): String {

@@ -8,6 +8,7 @@ import android.view.KeyEvent
 import android.view.View
 import android.widget.EditText
 import android.widget.FrameLayout
+import android.widget.HorizontalScrollView
 import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.ScrollView
@@ -32,6 +33,11 @@ class ChatPanel(
     private val empty: TextView
     private var busy = false
     val handle = LinearLayout(ctx)
+    val gripRow = GripRow(ctx)
+    private val pending = ArrayList<Picked>()
+    private val pendRow = LinearLayout(ctx)
+    private val pendScroll = HorizontalScrollView(ctx)
+    private val pickRow = LinearLayout(ctx)
 
     init {
         orientation = VERTICAL
@@ -56,9 +62,28 @@ class ChatPanel(
         scroll.addView(list, FrameLayout.LayoutParams(MATCH, WRAP))
         addView(scroll, LayoutParams(MATCH, 0, 1f))
 
+        pendScroll.isHorizontalScrollBarEnabled = false
+        pendScroll.visibility = View.GONE
+        pendRow.setPadding(ctx.dp(8), ctx.dp(6), ctx.dp(8), ctx.dp(2))
+        pendScroll.addView(pendRow, FrameLayout.LayoutParams(WRAP, WRAP))
+        addView(pendScroll, LayoutParams(MATCH, WRAP))
+
+        pickRow.visibility = View.GONE
+        pickRow.setPadding(ctx.dp(8), ctx.dp(6), ctx.dp(8), ctx.dp(2))
+        val kinds = listOf("image" to "Galeri", "camera" to "Kamera", "file" to "File")
+        for (k in kinds) {
+            val c = ctx.button(k.second, false) { pick(k.first, false) }
+            c.setPadding(ctx.dp(12), ctx.dp(8), ctx.dp(12), ctx.dp(8))
+            pickRow.addView(c, ctx.lp(0, WRAP, 0, 0, 8, 0).also { it.weight = 1f })
+        }
+        addView(pickRow, LayoutParams(MATCH, WRAP))
+
         val row = LinearLayout(ctx)
         row.gravity = Gravity.CENTER_VERTICAL
         row.setPadding(ctx.dp(8), ctx.dp(6), ctx.dp(8), ctx.dp(8))
+        val plus = ctx.button("+", false) { togglePick() }
+        plus.setPadding(ctx.dp(14), ctx.dp(8), ctx.dp(14), ctx.dp(8))
+        row.addView(plus, ctx.lp(WRAP, WRAP, 0, 0, 8, 0))
 
         input.hint = "Tanya Zero"
         input.setHintTextColor(Pal.dim)
@@ -77,6 +102,12 @@ class ChatPanel(
         send.setPadding(ctx.dp(16), ctx.dp(10), ctx.dp(16), ctx.dp(10))
         row.addView(send, ctx.lp(WRAP, WRAP, 8, 0, 0, 0))
         addView(row, LayoutParams(MATCH, WRAP))
+        addView(gripRow, LayoutParams(MATCH, WRAP))
+    }
+
+    fun enableResize(): View {
+        gripRow.visibility = View.VISIBLE
+        return gripRow.grip
     }
 
     private fun headAction(label: String, click: () -> Unit): TextView {
@@ -98,28 +129,119 @@ class ChatPanel(
         list.addView(empty)
     }
 
+    private fun togglePick() {
+        pickRow.visibility = if (pickRow.visibility == View.VISIBLE) View.GONE else View.VISIBLE
+    }
+
+    private fun pick(kind: String, auto: Boolean) {
+        pickRow.visibility = View.GONE
+        Attach.request(context, kind) { items ->
+            if (auto) sendItems("", items) else addPending(items)
+        }
+    }
+
+    fun quickPick(kind: String) {
+        pick(kind, true)
+    }
+
+    fun addPending(items: List<Picked>) {
+        for (p in items) {
+            if (pending.size < 6) pending.add(p)
+        }
+        renderPending()
+    }
+
+    private fun renderPending() {
+        pendRow.removeAllViews()
+        pendScroll.visibility = if (pending.isEmpty()) View.GONE else View.VISIBLE
+        for (p in ArrayList(pending)) {
+            val chip = LinearLayout(context)
+            chip.gravity = Gravity.CENTER_VERTICAL
+            chip.setPadding(context.dp(6), context.dp(5), context.dp(8), context.dp(5))
+            if (p.bitmaps.isNotEmpty()) {
+                val iv = ImageView(context)
+                iv.setImageBitmap(Pix.thumb(p.bitmaps[0], 120))
+                iv.scaleType = ImageView.ScaleType.CENTER_CROP
+                chip.addView(iv, context.lp(context.dp(34), context.dp(34), 0, 0, 6, 0))
+            }
+            val label = context.tv(p.name, 12f, Pal.text, Fonts.medium)
+            label.maxWidth = context.dp(120)
+            label.maxLines = 1
+            label.ellipsize = android.text.TextUtils.TruncateAt.END
+            chip.addView(label)
+            val x = context.tv("x", 14f, Pal.danger, Fonts.head)
+            x.setPadding(context.dp(10), context.dp(4), context.dp(4), context.dp(4))
+            x.setOnClickListener {
+                pending.remove(p)
+                renderPending()
+            }
+            chip.addView(x)
+            context.skin(chip, Pal.panel, 3, false, 4f, 2)
+            pendRow.addView(chip, context.lp(WRAP, WRAP, 0, 0, 8, 0))
+        }
+    }
+
     private fun submit() {
         val t = input.text.toString().trim()
-        if (t.isEmpty()) return
+        if (t.isEmpty() && pending.isEmpty()) return
         if (busy) {
             Toast.makeText(context, "Zero masih menjawab", Toast.LENGTH_SHORT).show()
             return
         }
         input.setText("")
-        ask(t, null, null)
+        if (pending.isEmpty()) {
+            ask(t, null, null)
+            return
+        }
+        val items = ArrayList(pending)
+        pending.clear()
+        renderPending()
+        sendItems(t, items)
+    }
+
+    private fun sendItems(userText: String, items: List<Picked>) {
+        val imgs = ArrayList<Bitmap>()
+        val names = ArrayList<String>()
+        var pdf: ByteArray? = null
+        val sb = StringBuilder()
+        sb.append(if (userText.isEmpty()) "Jelaskan dan analisis lampiran ini. Jawab pertanyaan atau tugas di dalamnya kalau ada." else userText)
+        for (p in items) {
+            names.add(p.name)
+            imgs.addAll(p.bitmaps)
+            val d = p.pdf
+            if (d != null) pdf = d
+            val tx = p.text
+            if (tx != null) {
+                sb.append("\n\nIsi file ").append(p.name).append(":\n").append(tx)
+            }
+        }
+        send(sb.toString(), userText, imgs, pdf, names)
     }
 
     fun ask(text: String, image: Bitmap?, shown: String?) {
+        val imgs = ArrayList<Bitmap>()
+        if (image != null) imgs.add(image)
+        send(text, shown ?: text, imgs, null, emptyList())
+    }
+
+    private fun send(text: String, shown: String, imgs: List<Bitmap>, pdf: ByteArray?, names: List<String>) {
         if (busy) {
             Toast.makeText(context, "Zero masih menjawab", Toast.LENGTH_SHORT).show()
             return
         }
         if (empty.parent != null) list.removeView(empty)
-        addUser(shown ?: text, image)
-        if (image != null) {
-            for (t in turns) t.image = null
+        addUser(shown, imgs, names)
+        if (imgs.isNotEmpty() || pdf != null) {
+            for (t in turns) {
+                t.image = null
+                t.more = emptyList()
+                t.pdf = null
+            }
         }
-        turns.add(Gemini.Turn("user", text, image))
+        val turn = Gemini.Turn("user", text, if (imgs.isNotEmpty()) imgs[0] else null)
+        if (imgs.size > 1) turn.more = ArrayList(imgs.subList(1, imgs.size))
+        turn.pdf = pdf
+        turns.add(turn)
         dispatch()
     }
 
@@ -173,23 +295,32 @@ class ChatPanel(
 
     private fun maxBubble(): Int = (context.resources.displayMetrics.widthPixels * 0.78f).toInt()
 
-    private fun addUser(text: String, image: Bitmap?) {
+    private fun addUser(text: String, imgs: List<Bitmap>, names: List<String>) {
         val box = LinearLayout(context)
         box.orientation = VERTICAL
         box.setPadding(context.dp(10), context.dp(8), context.dp(10), context.dp(8))
         context.skin(box, Pal.hi, 3)
-        if (image != null) {
-            val iv = ImageView(context)
-            iv.setImageBitmap(Pix.thumb(image))
-            iv.adjustViewBounds = true
-            iv.maxHeight = context.dp(180)
-            iv.maxWidth = context.dp(200)
-            iv.scaleType = ImageView.ScaleType.FIT_CENTER
-            box.addView(iv, context.lp(WRAP, WRAP, 0, 0, 0, 6))
+        if (imgs.isNotEmpty()) {
+            val strip = LinearLayout(context)
+            strip.gravity = Gravity.CENTER_VERTICAL
+            val shown = if (imgs.size > 3) 3 else imgs.size
+            for (k in 0 until shown) {
+                val iv = ImageView(context)
+                iv.setImageBitmap(Pix.thumb(imgs[k], 360))
+                iv.scaleType = ImageView.ScaleType.CENTER_CROP
+                strip.addView(iv, context.lp(context.dp(96), context.dp(96), 0, 0, 6, 0))
+            }
+            if (imgs.size > 3) strip.addView(context.tv("+" + (imgs.size - 3), 16f, Pal.text, Fonts.head))
+            box.addView(strip, context.lp(WRAP, WRAP, 0, 0, 0, 6))
         }
-        val t = context.tv(text, 15f, Pal.text, Fonts.body)
-        t.maxWidth = maxBubble()
-        box.addView(t, LayoutParams(WRAP, WRAP))
+        for (n in names) {
+            box.addView(context.tv("File: " + n, 12f, Pal.dim, Fonts.mono), LayoutParams(WRAP, WRAP))
+        }
+        if (text.isNotEmpty()) {
+            val t = context.tv(text, prefs.fontSize.toFloat(), Pal.text, Fonts.body)
+            t.maxWidth = maxBubble()
+            box.addView(t, LayoutParams(WRAP, WRAP))
+        }
         val p = context.lp(WRAP, WRAP, 24, 6, 0, 2)
         p.gravity = Gravity.END
         list.addView(box, p)
@@ -203,12 +334,12 @@ class ChatPanel(
         val head = context.tv("", 12f, Pal.accent, Fonts.medium)
         head.visibility = View.GONE
         head.setPadding(0, 0, 0, context.dp(4))
-        val think = context.tv("", 13f, Pal.dim, Fonts.note)
+        val think = context.tv("", (prefs.fontSize - 2).toFloat(), Pal.dim, Fonts.note)
         think.visibility = View.GONE
         think.maxWidth = maxBubble()
         think.setLineSpacing(0f, 1.1f)
         think.setPadding(context.dp(8), 0, 0, context.dp(8))
-        val answer = context.tv("Zero lagi mikir...", 15f, Pal.dim, Fonts.body)
+        val answer = context.tv("Zero lagi mikir...", prefs.fontSize.toFloat(), Pal.dim, Fonts.body)
         answer.maxWidth = maxBubble()
         answer.setLineSpacing(0f, 1.12f)
         answer.setTextIsSelectable(true)

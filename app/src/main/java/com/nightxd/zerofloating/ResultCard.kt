@@ -4,6 +4,7 @@ import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
 import android.graphics.Bitmap
+import android.util.TypedValue
 import android.view.Gravity
 import android.view.View
 import android.widget.FrameLayout
@@ -12,7 +13,7 @@ import android.widget.ScrollView
 import android.widget.TextView
 import android.widget.Toast
 
-class CappedScroll(ctx: Context, private val cap: Int, private val fixed: Boolean) : ScrollView(ctx) {
+class CappedScroll(ctx: Context, var cap: Int, private val fixed: Boolean) : ScrollView(ctx) {
     override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
         val mode = if (fixed) MeasureSpec.EXACTLY else MeasureSpec.AT_MOST
         super.onMeasure(widthMeasureSpec, MeasureSpec.makeMeasureSpec(cap, mode))
@@ -26,7 +27,8 @@ class ResultCard(
 ) : LinearLayout(ctx) {
 
     private val head = ctx.tv("Terjemahan", 15f, Pal.accent, Fonts.head)
-    private val body = ctx.tv("", 15f, Pal.text, Fonts.body)
+    private val body = ctx.tv("", Prefs(ctx).fontSize.toFloat(), Pal.text, Fonts.body)
+    val gripRow = GripRow(ctx)
     private val shrink: TextView
     private val scroll: CappedScroll
     private var collapsed = false
@@ -52,13 +54,14 @@ class ResultCard(
         addView(row, LayoutParams(MATCH, WRAP))
         addView(ctx.rule(3), LayoutParams(MATCH, ctx.dp(3)))
 
-        val cap = (ctx.resources.displayMetrics.heightPixels * (if (fixed) 0.24f else 0.36f)).toInt()
+        val cap = (ctx.resources.displayMetrics.heightPixels * Prefs(ctx).cardHeight / 100f).toInt()
         scroll = CappedScroll(ctx, cap, fixed)
         body.setLineSpacing(0f, 1.15f)
         body.setTextIsSelectable(true)
         body.setPadding(ctx.dp(14), ctx.dp(4), ctx.dp(14), ctx.dp(14))
         scroll.addView(body, FrameLayout.LayoutParams(MATCH, WRAP))
         addView(scroll, LayoutParams(MATCH, WRAP))
+        addView(gripRow, LayoutParams(MATCH, WRAP))
     }
 
     private fun action(label: String, click: () -> Unit): TextView {
@@ -67,6 +70,24 @@ class ResultCard(
         context.pressable(t, 8f)
         t.setOnClickListener { click() }
         return t
+    }
+
+    fun enableResize(): View {
+        gripRow.visibility = View.VISIBLE
+        return gripRow.grip
+    }
+
+    fun capPx(): Int = scroll.cap
+
+    fun setCapPx(px: Int) {
+        scroll.cap = px
+        scroll.requestLayout()
+    }
+
+    fun applyStyle() {
+        val p = Prefs(context)
+        body.setTextSize(TypedValue.COMPLEX_UNIT_SP, p.fontSize.toFloat())
+        setCapPx((resources.displayMetrics.heightPixels * p.cardHeight / 100f).toInt())
     }
 
     private fun toggle() {
@@ -123,7 +144,8 @@ class ResultCard(
         val lang = prefs.lang
         loading("Menerjemahkan ke " + lang)
         val turn = Gemini.Turn("user", Zero.translateImage(lang), bmp)
-        Gemini.stream(prefs, Zero.system(lang), listOf(turn), { p -> partial(lang, p) }, { r -> done(prefs, lang, r) }, null, true)
+        turn.small = prefs.trMode == "fast"
+        Gemini.stream(prefs, Zero.system(lang), listOf(turn), { p -> partial(lang, p) }, { r -> done(prefs, lang, r) }, null, true, true)
     }
 
     fun translateText(prefs: Prefs, source: String) {
@@ -131,6 +153,6 @@ class ResultCard(
         val lang = prefs.lang
         loading("Menerjemahkan ke " + lang)
         val turn = Gemini.Turn("user", Zero.translateText(lang, source))
-        Gemini.stream(prefs, Zero.system(lang), listOf(turn), { p -> partial(lang, p) }, { r -> done(prefs, lang, r) }, null, true)
+        Gemini.stream(prefs, Zero.system(lang), listOf(turn), { p -> partial(lang, p) }, { r -> done(prefs, lang, r) }, null, true, true)
     }
 }

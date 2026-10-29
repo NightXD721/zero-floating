@@ -106,7 +106,7 @@ class ScreenGrabber(
         } catch (e: Exception) {
             false
         }
-        main.postDelayed({ cb(take()) }, if (resized) 700L else 380L)
+        main.postDelayed({ cb(take()) }, if (resized) 500L else 220L)
     }
 
     private fun take(): Bitmap? {
