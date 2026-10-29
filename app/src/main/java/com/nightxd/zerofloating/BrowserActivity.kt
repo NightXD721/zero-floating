@@ -635,11 +635,13 @@ class BrowserActivity : Activity() {
             }
             return
         }
-        // crop mode: overlay selection on host
+        // crop mode: SelectionView returns pixel coords relative to itself
         var sv: SelectionView? = null
         sv = SelectionView(this) { r: RectF? ->
-            val v = sv
-            if (v != null) host.removeView(v)
+            val view = sv
+            val vw = view?.width ?: 0
+            val vh = view?.height ?: 0
+            if (view != null) host.removeView(view)
             sv = null
             if (r == null) return@SelectionView
             captureWeb { bmp ->
@@ -647,17 +649,23 @@ class BrowserActivity : Activity() {
                     toast("Gagal tangkap layar")
                     return@captureWeb
                 }
-                val rect = Rect(
-                    (r.left * bmp.width).toInt().coerceIn(0, bmp.width - 1),
-                    (r.top * bmp.height).toInt().coerceIn(0, bmp.height - 1),
-                    (r.right * bmp.width).toInt().coerceIn(1, bmp.width),
-                    (r.bottom * bmp.height).toInt().coerceIn(1, bmp.height)
-                )
+                // map selection pixels → bitmap pixels
+                val sx = if (vw > 0) bmp.width.toFloat() / vw else 1f
+                val sy = if (vh > 0) bmp.height.toFloat() / vh else 1f
+                val left = (r.left * sx).toInt().coerceIn(0, bmp.width - 1)
+                val top = (r.top * sy).toInt().coerceIn(0, bmp.height - 1)
+                val right = (r.right * sx).toInt().coerceIn(left + 1, bmp.width)
+                val bottom = (r.bottom * sy).toInt().coerceIn(top + 1, bmp.height)
+                val rect = Rect(left, top, right, bottom)
                 if (rect.width() < 8 || rect.height() < 8) {
                     toast("Area terlalu kecil")
                     return@captureWeb
                 }
-                val cropped = try { Bitmap.createBitmap(bmp, rect.left, rect.top, rect.width(), rect.height()) } catch (_: Exception) { null }
+                val cropped = try {
+                    Bitmap.createBitmap(bmp, rect.left, rect.top, rect.width(), rect.height())
+                } catch (_: Exception) {
+                    null
+                }
                 if (cropped == null) {
                     toast("Gagal crop")
                     return@captureWeb
@@ -693,8 +701,10 @@ class BrowserActivity : Activity() {
         }
         var sv: SelectionView? = null
         sv = SelectionView(this) { r: RectF? ->
-            val v = sv
-            if (v != null) host.removeView(v)
+            val view = sv
+            val vw = view?.width ?: 0
+            val vh = view?.height ?: 0
+            if (view != null) host.removeView(view)
             sv = null
             if (r == null) return@SelectionView
             captureWeb { bmp ->
@@ -702,17 +712,22 @@ class BrowserActivity : Activity() {
                     toast("Gagal tangkap layar")
                     return@captureWeb
                 }
-                val rect = Rect(
-                    (r.left * bmp.width).toInt().coerceIn(0, bmp.width - 1),
-                    (r.top * bmp.height).toInt().coerceIn(0, bmp.height - 1),
-                    (r.right * bmp.width).toInt().coerceIn(1, bmp.width),
-                    (r.bottom * bmp.height).toInt().coerceIn(1, bmp.height)
-                )
+                val sx = if (vw > 0) bmp.width.toFloat() / vw else 1f
+                val sy = if (vh > 0) bmp.height.toFloat() / vh else 1f
+                val left = (r.left * sx).toInt().coerceIn(0, bmp.width - 1)
+                val top = (r.top * sy).toInt().coerceIn(0, bmp.height - 1)
+                val right = (r.right * sx).toInt().coerceIn(left + 1, bmp.width)
+                val bottom = (r.bottom * sy).toInt().coerceIn(top + 1, bmp.height)
+                val rect = Rect(left, top, right, bottom)
                 if (rect.width() < 8 || rect.height() < 8) {
                     toast("Area terlalu kecil")
                     return@captureWeb
                 }
-                val cropped = try { Bitmap.createBitmap(bmp, rect.left, rect.top, rect.width(), rect.height()) } catch (_: Exception) { null }
+                val cropped = try {
+                    Bitmap.createBitmap(bmp, rect.left, rect.top, rect.width(), rect.height())
+                } catch (_: Exception) {
+                    null
+                }
                 if (cropped == null) toast("Gagal crop") else doTr(cropped)
             }
         }
@@ -1093,7 +1108,8 @@ class BrowserActivity : Activity() {
         toast("AI sedang menjawab ${toFill.size} soal...")
         val sb = StringBuilder()
         sb.append("Jawab soal berikut dengan teliti (hitung ulang). Balas HANYA JSON array valid tanpa markdown.\n")
-        sb.append("Format: [{\"num\":1,\"type\":\"ganda\",\"answer\":\"...\"},{\"num\":2,\"type\":\"esai\",\"answer\":\"...\"}]\n")
+        sb.append("PENTING: field \"num\" HARUS sama persis dengan nomor soal di bawah (bukan 1,2,3 jika soalnya 21,22,23).\n")
+        sb.append("Format: [{\"num\":21,\"type\":\"ganda\",\"answer\":\"A\"},{\"num\":22,\"type\":\"ganda\",\"answer\":\"1.875 buah\"}]\n")
         sb.append("Aturan answer:\n")
         sb.append("- Pilihan ganda BERHURUF (A/B/C/D): isi huruf saja, contoh \"A\".\n")
         sb.append("- Pilihan ganda TEKS (tanpa A/B/C/D): isi TEKS OPSI PERSIS, contoh \"1.875 buah\".\n")
@@ -1118,13 +1134,36 @@ class BrowserActivity : Activity() {
                 result.onSuccess { text ->
                     main.post {
                         try {
-                            val clean = text.trim().removePrefix("```json").removePrefix("```").removeSuffix("```").trim()
+                            var clean = text.trim()
+                            clean = clean.replace(Regex("```(?:json)?"), "").replace("```", "").trim()
+                            val start = clean.indexOf('[')
+                            val end = clean.lastIndexOf(']')
+                            if (start >= 0 && end > start) clean = clean.substring(start, end + 1)
                             val arr = JSONArray(clean)
-                            val answers = HashMap<Int, String>()
+                            // AI sering balas num 1..N padahal soal aslinya 21..25 → map by order juga
+                            val byNum = HashMap<Int, String>()
+                            val orderedAns = ArrayList<String>()
                             for (i in 0 until arr.length()) {
                                 val o = arr.getJSONObject(i)
-                                answers[o.optInt("num")] = o.optString("answer", "")
+                                val num = o.optInt("num", o.optInt("id", -1))
+                                val a = o.optString("answer", o.optString("jawaban", "")).trim()
+                                if (a.isEmpty()) continue
+                                orderedAns.add(a)
+                                if (num > 0) byNum[num] = a
                             }
+                            val answers = HashMap<Int, String>()
+                            val sortedQs = toFill.sortedBy { it.num }
+                            for ((idx, q) in sortedQs.withIndex()) {
+                                val a = byNum[q.num]
+                                    ?: orderedAns.getOrNull(idx)
+                                    ?: byNum[idx + 1]
+                                if (!a.isNullOrBlank()) answers[q.num] = a
+                            }
+                            if (answers.isEmpty()) {
+                                toast("AI tidak mengembalikan jawaban")
+                                return@post
+                            }
+                            toast("Dapat ${answers.size} jawaban, mengisi...")
                             applyAnswers(toFill, answers)
                         } catch (e: Exception) {
                             toast("Gagal parse jawaban AI: ${e.message}")
@@ -1140,7 +1179,6 @@ class BrowserActivity : Activity() {
     }
 
     private fun applyAnswers(qs: List<FormQuestion>, answers: Map<Int, String>) {
-        // only checked questions, already filtered; process one by one in order
         val ordered = qs.sortedBy { it.num }
         var done = 0
         fun next(i: Int) {
@@ -1151,138 +1189,146 @@ class BrowserActivity : Activity() {
             val q = ordered[i]
             val ans = answers[q.num]?.trim().orEmpty()
             if (ans.isBlank()) {
-                // skip empty answer, go to next checked
                 main.postDelayed({ next(i + 1) }, 200)
                 return
             }
-            toast("Soal ${q.num}: mengisi...")
-            val qText = q.text.take(40).replace("\\", "\\\\").replace("'", "\\'").replace("\n", " ")
-            val escaped = ans.replace("\\", "\\\\").replace("'", "\\'").replace("\n", "\\n").replace("\"", "\\\"")
-            val optsJson = q.options.joinToString(",") { "'${it.replace("'", "\\'").take(60)}'" }
+            toast("Soal ${q.num}: $ans")
+            val escaped = JSONObject.quote(ans)
+            val qTextEsc = JSONObject.quote(q.text.take(50))
+            val optsArr = JSONArray()
+            for (op in q.options) optsArr.put(op)
+            val optsEsc = optsArr.toString()
+            val isGanda = q.type == "ganda" || q.type == "checkbox"
             val js = """
 (function(){
   var qNum = ${q.num};
-  var qHint = '$qText'.toLowerCase();
-  var ans = '$escaped';
-  function norm(s){
-    return (s||'').toLowerCase()
-      .replace(/[^\w\u00C0-\u024F\u1E00-\u1EFF.%°√π+\-/=()\s]/gi,' ')
-      .replace(/\s+/g,' ').trim();
-  }
-  function normNum(s){
-    // "1.875 buah" / "1,875" → comparable
-    return norm(s).replace(/\./g,'').replace(/,/g,'');
-  }
-  var ansNorm = norm(ans);
-  var ansNum = normNum(ans);
-  // letter only if answer is essentially A/B/C/D (not "1.500 buah")
-  var letter = '';
-  if(/^[a-d]$/i.test(ans.trim()) || /^[a-d][\.\)]\s*$/i.test(ans.trim())){
-    letter = ans.trim().charAt(0).toUpperCase();
-  } else if(/^[a-d][\.\)]\s+\S/i.test(ans.trim())){
-    letter = ans.trim().charAt(0).toUpperCase();
-    ansNorm = norm(ans.replace(/^[a-d][\.\)]\s*/i,''));
-    ansNum = normNum(ansNorm);
-  }
-  var opts = [$optsJson];
-  var typ = '${q.type}';
+  var ans = $escaped;
+  var qHint = $qTextEsc;
+  var opts = $optsEsc;
+  var isGanda = ${if (isGanda) "true" else "false"};
 
   function clickEl(el){
     if(!el) return false;
-    try{ el.scrollIntoView({behavior:'smooth',block:'center'}); }catch(e){}
+    try{ el.scrollIntoView({block:'center',inline:'nearest'}); }catch(e){}
     try{
-      if(el.focus) el.focus();
+      el.focus && el.focus();
+      var r = el.getBoundingClientRect();
+      var x = r.left + r.width/2, y = r.top + r.height/2;
+      ['pointerdown','mousedown','mouseup','click'].forEach(function(type){
+        el.dispatchEvent(new MouseEvent(type,{bubbles:true,cancelable:true,clientX:x,clientY:y,view:window}));
+      });
       if(el.click) el.click();
-      if(el.checked !== undefined){ el.checked = true; }
+      if('checked' in el) el.checked = true;
       el.dispatchEvent(new Event('input',{bubbles:true}));
       el.dispatchEvent(new Event('change',{bubbles:true}));
-      el.dispatchEvent(new MouseEvent('click',{bubbles:true,cancelable:true,view:window}));
     }catch(e){}
     return true;
   }
-  function matchText(t){
-    if(!t) return false;
-    var tn = norm(t);
-    var tnum = normNum(t);
-    if(ansNorm && (tn===ansNorm || tn.indexOf(ansNorm)>=0 || ansNorm.indexOf(tn)>=0)) return true;
-    if(ansNum && ansNum.length>=3 && (tnum===ansNum || tnum.indexOf(ansNum)>=0 || ansNum.indexOf(tnum)>=0)) return true;
-    for(var o=0;o<opts.length;o++){
-      var op = norm(opts[o]);
-      var opn = normNum(opts[o]);
-      if(op && (tn===op || tn.indexOf(op)>=0 || op.indexOf(tn)>=0)) return true;
-      if(opn && opn.length>=3 && (tnum===opn || tnum.indexOf(opn)>=0)) return true;
-    }
-    return false;
-  }
 
+  function txt(el){
+    return ((el.getAttribute && (el.getAttribute('aria-label')||el.getAttribute('data-value'))) || el.innerText || el.textContent || el.value || '')+'';
+  }
+  function norm(s){
+    return (s||'').toLowerCase().replace(/\s+/g,' ').replace(/[^\w\u00C0-\u024F.%°+\-\/() ]+/g,'').trim();
+  }
+  function digits(s){ return (s||'').replace(/[^\d]/g,''); }
+
+  // letter A-D only if answer is short letter form
+  var letter = '';
+  var m = ans.trim().match(/^([A-Da-d])(?:[\.)]\s*|$)/);
+  if(m && ans.trim().length <= 4) letter = m[1].toUpperCase();
+  else if(m && /^[A-Da-d][\.)]\s*\S/.test(ans.trim())) letter = m[1].toUpperCase();
+
+  // find question block by number or text
   function findBlock(){
-    var items = document.querySelectorAll('[role="listitem"],[data-item-id],.freebirdFormviewerViewItemsItemItem,.Qr7Oae,.geS5n,div[jsname]');
-    var best = null;
+    var sels = '[role="listitem"],[data-item-id],.freebirdFormviewerViewItemsItemItem,.Qr7Oae,.geS5n';
+    var items = document.querySelectorAll(sels);
+    var best = null, bestScore = 0;
+    var hint = norm(qHint).substring(0, 30);
     for(var i=0;i<items.length;i++){
-      var t = (items[i].innerText||'').toLowerCase().replace(/\s+/g,' ');
-      if(!t) continue;
-      // match "21." at start of a line inside block
-      if(new RegExp('(^|\\\\n)\\\\s*'+qNum+'[\\\\.\\\\)]\\\\s').test(t) || t.indexOf(qNum+'. ')>=0 || t.indexOf(qNum+') ')>=0){
-        if(t.length < 1200) return items[i];
-        if(!best) best = items[i];
-      }
-      if(qHint.length>8 && t.indexOf(qHint.substring(0,Math.min(24,qHint.length)))>=0){
-        if(!best || t.length < (best.innerText||'').length) best = items[i];
-      }
+      var t = (items[i].innerText||'').replace(/\s+/g,' ');
+      var tl = t.toLowerCase();
+      var score = 0;
+      if(new RegExp('(?:^|\\n)\\s*'+qNum+'[\\.)]\\s').test(t)) score += 10;
+      if(tl.indexOf(qNum+'. ')>=0 || tl.indexOf(qNum+') ')>=0) score += 8;
+      if(hint.length>6 && tl.indexOf(hint)>=0) score += 5;
+      if(score>bestScore){ bestScore=score; best=items[i]; }
     }
     return best;
   }
 
   var block = findBlock();
-  if(block){
-    try{ block.scrollIntoView({behavior:'smooth',block:'center'}); }catch(e){}
-  }
+  if(block) try{ block.scrollIntoView({block:'center'}); }catch(e){}
   var root = block || document.body;
 
-  if(typ === 'ganda' || typ === 'checkbox'){
-    var radios = root.querySelectorAll('input[type="radio"],input[type="checkbox"],[role="radio"],[role="checkbox"]');
-    // 1) letter index only when answer is A-D style
+  if(isGanda){
+    var radios = Array.prototype.slice.call(
+      root.querySelectorAll('[role="radio"],[role="checkbox"],input[type="radio"],input[type="checkbox"]')
+    );
+    // filter to only those inside this block if we found one
+    if(block && radios.length>8){
+      radios = radios.filter(function(el){ return block.contains(el); });
+    }
+
+    // 1) letter index A=0 B=1 ...
     if(letter && radios.length>0){
       var idx = letter.charCodeAt(0)-65;
-      if(idx>=0 && idx<radios.length) return clickEl(radios[idx]);
+      if(idx>=0 && idx<radios.length){
+        if(clickEl(radios[idx])) return true;
+      }
     }
-    // 2) match by option text on radio/label
+
+    // 2) match option text
+    var targets = [ans].concat(opts);
+    if(letter) targets.push(letter, letter+'.', letter+')');
     for(var i=0;i<radios.length;i++){
       var el = radios[i];
       var lab = el.closest('label') || el.parentElement || el;
-      var t = ((lab.innerText||lab.textContent||el.getAttribute('aria-label')||'')+'');
-      if(matchText(t)) return clickEl(el);
-      if(letter && norm(t)===letter.toLowerCase()) return clickEl(el);
+      var t = txt(lab) + ' ' + txt(el);
+      var tn = norm(t);
+      var td = digits(t);
+      for(var k=0;k<targets.length;k++){
+        var a = targets[k]; if(!a) continue;
+        var an = norm(a); var ad = digits(a);
+        if(an && (tn===an || tn.indexOf(an)>=0 || an.indexOf(tn)>=0 && tn.length>1)){
+          if(clickEl(el)) return true;
+        }
+        if(ad && ad.length>=3 && td && (td===ad || td.indexOf(ad)>=0 || ad.indexOf(td)>=0)){
+          if(clickEl(el)) return true;
+        }
+      }
     }
-    // 3) clickable labels/spans with option text
-    var labs = root.querySelectorAll('label,span,div,li');
-    for(var i=0;i<labs.length;i++){
-      var t = ((labs[i].innerText||'')+'');
-      if(t.length<1||t.length>120) continue;
-      if(matchText(t)) return clickEl(labs[i]);
+
+    // 3) click any visible label with matching text inside block
+    var labels = root.querySelectorAll('label, div[role="radio"], span');
+    for(var i=0;i<labels.length;i++){
+      var t = txt(labels[i]);
+      if(t.length<1 || t.length>80) continue;
+      var tn = norm(t);
+      if(letter && (tn===letter.toLowerCase() || tn.indexOf(letter.toLowerCase()+'.')===0)){
+        if(clickEl(labels[i])) return true;
+      }
+      if(norm(ans) && (tn===norm(ans) || tn.indexOf(norm(ans))>=0)){
+        if(clickEl(labels[i])) return true;
+      }
     }
     return false;
   }
 
-  // essay: isi teks ke kotak di blok soal ini
-  var fields = root.querySelectorAll('textarea,input[type="text"],input:not([type]),div[contenteditable="true"],div[role="textbox"]');
-  if(fields.length===0 && block) fields = block.querySelectorAll('textarea,input,div[contenteditable="true"]');
+  // essay
+  var fields = root.querySelectorAll('textarea, input[type="text"], input:not([type]), div[contenteditable="true"], div[role="textbox"]');
   for(var i=0;i<fields.length;i++){
     var el = fields[i];
-    if(!(el.tagName==='TEXTAREA' || el.tagName==='INPUT' || el.isContentEditable)) continue;
-    try{ el.scrollIntoView({behavior:'smooth',block:'center'}); }catch(e){}
-    el.focus();
-    if(el.isContentEditable){
-      el.innerText = ans;
-    } else {
-      var setter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement&&window.HTMLTextAreaElement.prototype||{},'value')
-        || Object.getOwnPropertyDescriptor(window.HTMLInputElement&&window.HTMLInputElement.prototype||{},'value');
-      if(setter && setter.set) setter.set.call(el, ans);
-      else el.value = ans;
+    try{ el.scrollIntoView({block:'center'}); }catch(e){}
+    el.focus && el.focus();
+    if(el.isContentEditable){ el.innerText = ans; }
+    else {
+      var proto = el.tagName==='TEXTAREA' ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
+      var desc = Object.getOwnPropertyDescriptor(proto, 'value');
+      if(desc && desc.set) desc.set.call(el, ans); else el.value = ans;
     }
     el.dispatchEvent(new Event('input',{bubbles:true}));
     el.dispatchEvent(new Event('change',{bubbles:true}));
-    el.dispatchEvent(new KeyboardEvent('keyup',{bubbles:true}));
     return true;
   }
   return false;
@@ -1290,9 +1336,10 @@ class BrowserActivity : Activity() {
 """.trimIndent()
             web.evaluateJavascript(js) { ok ->
                 main.post {
-                    if (ok == "true") done++
-                    // wait for scroll + click to settle before next question
-                    main.postDelayed({ next(i + 1) }, 900)
+                    val success = ok == "true" || ok == "\"true\""
+                    if (success) done++
+                    else toast("Soal ${q.num}: gagal klik, coba manual")
+                    main.postDelayed({ next(i + 1) }, 1100)
                 }
             }
         }
