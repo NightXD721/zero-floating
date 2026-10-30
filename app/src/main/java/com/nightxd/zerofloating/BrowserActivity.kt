@@ -1103,87 +1103,133 @@ class BrowserActivity : Activity() {
 
     private fun fillSelected() {
         hideDock()
-        val toFill = questions.filter { selected.contains(it.num) }
+        val toFill = questions.filter { selected.contains(it.num) }.sortedBy { it.num }
         if (toFill.isEmpty()) return
-        toast("AI sedang menjawab ${toFill.size} soal...")
-        val sb = StringBuilder()
-        sb.append("Jawab soal berikut dengan teliti (hitung ulang). Balas HANYA JSON array valid tanpa markdown.\n")
-        sb.append("PENTING: field \"num\" HARUS sama persis dengan nomor soal di bawah (bukan 1,2,3 jika soalnya 21,22,23).\n")
-        sb.append("Format: [{\"num\":21,\"type\":\"ganda\",\"answer\":\"A\"},{\"num\":22,\"type\":\"ganda\",\"answer\":\"1.875 buah\"}]\n")
-        sb.append("Aturan answer:\n")
-        sb.append("- Pilihan ganda BERHURUF (A/B/C/D): isi huruf saja, contoh \"A\".\n")
-        sb.append("- Pilihan ganda TEKS (tanpa A/B/C/D): isi TEKS OPSI PERSIS, contoh \"1.875 buah\".\n")
-        sb.append("- Esai: teks jawaban lengkap.\n")
-        sb.append("- Jika ada gambar di screenshot, pakai gambar itu untuk menjawab.\n\n")
-        for (q in toFill) {
-            sb.append("Soal ${q.num} (${q.type}): ${q.text}\n")
-            if (q.options.isNotEmpty()) {
-                sb.append("Opsi:\n")
-                for (op in q.options) sb.append("  - ").append(op).append("\n")
-            }
-            if (q.hasImage) sb.append("(lihat gambar di screenshot)\n")
-            sb.append("\n")
+        toast("AI mengerjakan ${toFill.size} soal satu per satu...")
+        // Per soal: scroll → screenshot → AI (dengan gambar) → klik. Akurasi maksimal untuk soal gambar.
+        fillOneByOne(toFill, 0, 0)
+    }
+
+    private fun scrollToQuestion(q: FormQuestion, done: () -> Unit) {
+        val qTextEsc = JSONObject.quote(q.text.take(40))
+        val js = """
+(function(){
+  var qNum = ${q.num};
+  var hint = $qTextEsc;
+  var items = document.querySelectorAll('[role="listitem"],[data-item-id],.freebirdFormviewerViewItemsItemItem,.Qr7Oae,.geS5n');
+  var best = null, bestScore = 0;
+  for(var i=0;i<items.length;i++){
+    var t = (items[i].innerText||'').replace(/\s+/g,' ');
+    var score = 0;
+    if(new RegExp('(?:^|\\n)\\s*'+qNum+'[\\.)]\\s').test(t)) score += 10;
+    if(t.toLowerCase().indexOf(qNum+'. ')>=0) score += 8;
+    if(hint && t.toLowerCase().indexOf(hint.toLowerCase().substring(0,24))>=0) score += 5;
+    if(score > bestScore){ bestScore = score; best = items[i]; }
+  }
+  if(best){
+    best.scrollIntoView({block:'center', behavior:'instant'});
+    return true;
+  }
+  return false;
+})();
+""".trimIndent()
+        web.evaluateJavascript(js) {
+            main.postDelayed({ done() }, 450)
         }
-        fun runAsk(bmp: Bitmap?) {
-            val turn = Gemini.Turn("user", sb.toString(), bmp)
-            Gemini.ask(
-                prefs,
-                "Kamu asisten ujian akurat. Hitung dengan benar. Ganda berhuruf → huruf; ganda berteks → teks opsi persis; esai → teks. Hanya JSON array.",
-                listOf(turn)
-            ) { result ->
-                result.onSuccess { text ->
-                    main.post {
-                        try {
-                            var clean = text.trim()
-                            clean = clean.replace(Regex("```(?:json)?"), "").replace("```", "").trim()
-                            val start = clean.indexOf('[')
-                            val end = clean.lastIndexOf(']')
-                            if (start >= 0 && end > start) clean = clean.substring(start, end + 1)
+    }
+
+    private fun askOneQuestion(q: FormQuestion, bmp: Bitmap?, cb: (String?) -> Unit) {
+        val sb = StringBuilder()
+        sb.append("Jawab SATU soal ujian ini dengan teliti. Lihat gambar/screenshot jika ada diagram.\n")
+        sb.append("Balas HANYA JSON object (bukan array), tanpa markdown:\n")
+        sb.append("{\"num\":${q.num},\"answer\":\"...\"}\n")
+        sb.append("Aturan answer:\n")
+        sb.append("- Ganda berhuruf A/B/C/D: jawab huruf saja (contoh \"A\")\n")
+        sb.append("- Ganda berteks: jawab teks opsi PERSIS (contoh \"1.875 buah\")\n")
+        sb.append("- Esai: teks jawaban lengkap\n")
+        sb.append("- Hitung ulang, jangan menebak.\n\n")
+        sb.append("Soal ${q.num} (${q.type}): ${q.text}\n")
+        if (q.options.isNotEmpty()) {
+            sb.append("Opsi:\n")
+            for (op in q.options) sb.append("  - ").append(op).append("\n")
+        }
+        if (q.hasImage) sb.append("(Soal punya gambar — perhatikan diagram di screenshot)\n")
+        val turn = Gemini.Turn("user", sb.toString(), bmp)
+        Gemini.ask(
+            prefs,
+            "Asisten ujian akurat. Satu soal saja. Output JSON object {\"num\":N,\"answer\":\"...\"}.",
+            listOf(turn)
+        ) { result ->
+            result.onSuccess { text ->
+                main.post {
+                    try {
+                        var clean = text.trim()
+                            .replace(Regex("```(?:json)?"), "")
+                            .replace("```", "")
+                            .trim()
+                        val a0 = clean.indexOf('{')
+                        val a1 = clean.lastIndexOf('}')
+                        if (a0 >= 0 && a1 > a0) clean = clean.substring(a0, a1 + 1)
+                        // support array with one item too
+                        if (clean.startsWith("[")) {
                             val arr = JSONArray(clean)
-                            // AI sering balas num 1..N padahal soal aslinya 21..25 → map by order juga
-                            val byNum = HashMap<Int, String>()
-                            val orderedAns = ArrayList<String>()
-                            for (i in 0 until arr.length()) {
-                                val o = arr.getJSONObject(i)
-                                val num = o.optInt("num", o.optInt("id", -1))
-                                val a = o.optString("answer", o.optString("jawaban", "")).trim()
-                                if (a.isEmpty()) continue
-                                orderedAns.add(a)
-                                if (num > 0) byNum[num] = a
-                            }
-                            val answers = HashMap<Int, String>()
-                            val sortedQs = toFill.sortedBy { it.num }
-                            for ((idx, q) in sortedQs.withIndex()) {
-                                val a = byNum[q.num]
-                                    ?: orderedAns.getOrNull(idx)
-                                    ?: byNum[idx + 1]
-                                if (!a.isNullOrBlank()) answers[q.num] = a
-                            }
-                            if (answers.isEmpty()) {
-                                toast("AI tidak mengembalikan jawaban")
+                            if (arr.length() > 0) {
+                                val o = arr.getJSONObject(0)
+                                cb(o.optString("answer", o.optString("jawaban", "")).trim().ifEmpty { null })
                                 return@post
                             }
-                            toast("Dapat ${answers.size} jawaban, mengisi...")
-                            applyAnswers(toFill, answers)
-                        } catch (e: Exception) {
-                            toast("Gagal parse jawaban AI: ${e.message}")
                         }
+                        val o = JSONObject(clean)
+                        val a = o.optString("answer", o.optString("jawaban", "")).trim()
+                        cb(a.ifEmpty { null })
+                    } catch (e: Exception) {
+                        // last resort: plain letter or short text
+                        val m = Regex("""["']answer["']\s*:\s*["']([^"']+)["']""").find(text)
+                        cb(m?.groupValues?.getOrNull(1)?.trim())
                     }
-                }.onFailure { e ->
-                    main.post { toast("Gagal AI: ${e.message}") }
+                }
+            }.onFailure {
+                main.post { cb(null) }
+            }
+        }
+    }
+
+    private fun fillOneByOne(qs: List<FormQuestion>, index: Int, doneCount: Int) {
+        if (index >= qs.size) {
+            toast("Selesai: $doneCount / ${qs.size} soal terisi")
+            return
+        }
+        val q = qs[index]
+        toast("Soal ${q.num} (${index + 1}/${qs.size})...")
+        scrollToQuestion(q) {
+            captureWeb { bmp ->
+                askOneQuestion(q, bmp) { answer ->
+                    if (answer.isNullOrBlank()) {
+                        toast("Soal ${q.num}: AI tidak jawab")
+                        main.postDelayed({ fillOneByOne(qs, index + 1, doneCount) }, 400)
+                        return@askOneQuestion
+                    }
+                    toast("Soal ${q.num}: $answer")
+                    applyAnswers(listOf(q), mapOf(q.num to answer), silent = true) { ok ->
+                        fillOneByOne(qs, index + 1, doneCount + if (ok > 0) 1 else 0)
+                    }
                 }
             }
         }
-        // selalu kirim screenshot halaman agar soal gambar (geometri dll) terbaca
-        captureWeb { bmp -> runAsk(bmp) }
     }
 
-    private fun applyAnswers(qs: List<FormQuestion>, answers: Map<Int, String>) {
+    private fun applyAnswers(
+        qs: List<FormQuestion>,
+        answers: Map<Int, String>,
+        silent: Boolean = false,
+        onComplete: ((Int) -> Unit)? = null
+    ) {
         val ordered = qs.sortedBy { it.num }
         var done = 0
         fun next(i: Int) {
             if (i >= ordered.size) {
-                toast("Selesai mengisi $done dari ${ordered.size} soal")
+                if (!silent) toast("Selesai mengisi $done dari ${ordered.size} soal")
+                onComplete?.invoke(done)
                 return
             }
             val q = ordered[i]
@@ -1265,52 +1311,67 @@ class BrowserActivity : Activity() {
     var radios = Array.prototype.slice.call(
       root.querySelectorAll('[role="radio"],[role="checkbox"],input[type="radio"],input[type="checkbox"]')
     );
-    // filter to only those inside this block if we found one
-    if(block && radios.length>8){
-      radios = radios.filter(function(el){ return block.contains(el); });
+    if(block){
+      var inBlock = radios.filter(function(el){ return block.contains(el); });
+      if(inBlock.length > 0) radios = inBlock;
     }
 
-    // 1) letter index A=0 B=1 ...
-    if(letter && radios.length>0){
-      var idx = letter.charCodeAt(0)-65;
-      if(idx>=0 && idx<radios.length){
+    var ansN = norm(ans);
+    var ansD = digits(ans);
+
+    // score how well a label matches the ANSWER only (bukan semua opsi)
+    function scoreText(t){
+      var tn = norm(t);
+      var td = digits(t);
+      var s = 0;
+      if(!tn && !td) return 0;
+      // exact text
+      if(ansN && tn === ansN) s += 100;
+      // answer fully contained in label or vice versa (same length-ish)
+      if(ansN && tn.indexOf(ansN) >= 0) s += 50;
+      if(ansN && ansN.indexOf(tn) >= 0 && tn.length >= 3) s += 30;
+      // numeric exact (1.875 vs 1.500) — wajib sama, jangan partial
+      if(ansD && ansD.length >= 3 && td){
+        if(td === ansD) s += 80;
+        else if(td.indexOf(ansD) >= 0 || ansD.indexOf(td) >= 0) s += 5; // weak, avoid false first-option
+      }
+      // letter-only label "A" / "B"
+      if(letter && (tn === letter.toLowerCase() || tn === letter.toLowerCase()+'.' || tn.indexOf(letter.toLowerCase()+'.')===0)) s += 40;
+      return s;
+    }
+
+    // 1) letter index only when answer is pure A/B/C/D
+    if(letter && ans.trim().length <= 2 && radios.length > 0){
+      var idx = letter.charCodeAt(0) - 65;
+      if(idx >= 0 && idx < radios.length){
         if(clickEl(radios[idx])) return true;
       }
     }
 
-    // 2) match option text
-    var targets = [ans].concat(opts);
-    if(letter) targets.push(letter, letter+'.', letter+')');
+    // 2) pick radio with HIGHEST score (jangan klik opsi pertama yang kebetulan cocok longgar)
+    var bestEl = null, bestScore = 0;
     for(var i=0;i<radios.length;i++){
       var el = radios[i];
       var lab = el.closest('label') || el.parentElement || el;
       var t = txt(lab) + ' ' + txt(el);
-      var tn = norm(t);
-      var td = digits(t);
-      for(var k=0;k<targets.length;k++){
-        var a = targets[k]; if(!a) continue;
-        var an = norm(a); var ad = digits(a);
-        if(an && (tn===an || tn.indexOf(an)>=0 || an.indexOf(tn)>=0 && tn.length>1)){
-          if(clickEl(el)) return true;
-        }
-        if(ad && ad.length>=3 && td && (td===ad || td.indexOf(ad)>=0 || ad.indexOf(td)>=0)){
-          if(clickEl(el)) return true;
-        }
-      }
+      var sc = scoreText(t);
+      if(sc > bestScore){ bestScore = sc; bestEl = el; }
+    }
+    if(bestEl && bestScore >= 40){
+      if(clickEl(bestEl)) return true;
     }
 
-    // 3) click any visible label with matching text inside block
-    var labels = root.querySelectorAll('label, div[role="radio"], span');
+    // 3) labels / role=radio text nodes
+    bestEl = null; bestScore = 0;
+    var labels = root.querySelectorAll('label, [role="radio"], [role="checkbox"]');
     for(var i=0;i<labels.length;i++){
       var t = txt(labels[i]);
-      if(t.length<1 || t.length>80) continue;
-      var tn = norm(t);
-      if(letter && (tn===letter.toLowerCase() || tn.indexOf(letter.toLowerCase()+'.')===0)){
-        if(clickEl(labels[i])) return true;
-      }
-      if(norm(ans) && (tn===norm(ans) || tn.indexOf(norm(ans))>=0)){
-        if(clickEl(labels[i])) return true;
-      }
+      if(t.length < 1 || t.length > 100) continue;
+      var sc = scoreText(t);
+      if(sc > bestScore){ bestScore = sc; bestEl = labels[i]; }
+    }
+    if(bestEl && bestScore >= 40){
+      if(clickEl(bestEl)) return true;
     }
     return false;
   }
